@@ -126,16 +126,25 @@ class LLMInterface:
 
         logger.info("LLM Call #%d | model=%s", self.call_count, model)
 
-        # Build contents using the new SDK types
+        # Separate system instructions from conversation messages.
+        # Gemini does not support a "system" role in contents — it must be
+        # passed via system_instruction in GenerateContentConfig instead.
+        system_parts = [
+            msg["content"] for msg in messages if msg["role"] == "system"
+        ]
+        conversation = [msg for msg in messages if msg["role"] != "system"]
+
+        # Build contents using only user / model turns
         contents = [
             genai_types.Content(
                 role="user" if msg["role"] == "user" else "model",
                 parts=[genai_types.Part(text=msg["content"])],
             )
-            for msg in messages
+            for msg in conversation
         ]
 
         config = genai_types.GenerateContentConfig(
+            system_instruction="\n\n".join(system_parts) if system_parts else None,
             temperature=0.2,
             max_output_tokens=SystemConfig.SYNTHESIS_CONFIG["max_tokens"],
             response_mime_type="application/json",
