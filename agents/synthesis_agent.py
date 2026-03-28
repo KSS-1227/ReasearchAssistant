@@ -231,121 +231,101 @@ class SynthesisAgent(BaseAgent):
     
     def _create_fallback_synthesis(self, query: str, papers: List[Paper], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Create comprehensive deterministic fallback synthesis when LLM fails
-        
-        Uses extracted data to create detailed synthesis without LLM calls.
+        Deterministic fallback synthesis when LLM fails.
+        Extracts real sentences from document content to answer the query.
         """
-        
-        print("🔧 Creating COMPREHENSIVE deterministic fallback synthesis...")
-        
-        # Extract basic insights from papers
+
+        print("🔧 Creating deterministic fallback synthesis from document content...")
+
         top_papers = sorted(papers, key=lambda p: p.relevance_score, reverse=True)[:8]
-        
-        # Generate comprehensive findings from paper content
+        query_keywords = set(query.lower().split())
+
         key_findings = []
         methodology_insights = []
-        research_gaps = []
         technical_contributions = []
-        
-        for i, paper in enumerate(top_papers):
+
+        for paper in top_papers:
             paper_title_clean = paper.title.replace("Document: ", "")
-            
-            # Extract multiple findings from each paper's content
-            if hasattr(paper, 'full_text') and paper.full_text:
-                content = paper.full_text
-                sentences = [s.strip() for s in content.split('.') if len(s.strip()) > 50]
-                
-                # Extract technical findings
-                for sentence in sentences[:3]:  # Top 3 sentences per paper
-                    if any(tech_word in sentence.lower() for tech_word in ['algorithm', 'method', 'approach', 'model', 'architecture', 'performance', 'accuracy', 'efficiency']):
-                        key_findings.append(f"Technical analysis from {paper_title_clean} ({paper.year}): {sentence.strip()}")
-                
-                # Extract methodology insights
-                for sentence in sentences[3:5]:  # Next 2 sentences for methodology
-                    if any(method_word in sentence.lower() for method_word in ['training', 'optimization', 'evaluation', 'implementation', 'comparison', 'analysis']):
-                        methodology_insights.append(f"Methodological insight from {paper_title_clean}: {sentence.strip()}")
-            else:
-                # Use abstract if full text not available
-                abstract_sentences = [s.strip() for s in paper.abstract.split('.') if len(s.strip()) > 30]
-                for sentence in abstract_sentences[:2]:
-                    key_findings.append(f"Research finding from {paper_title_clean} ({paper.year}): {sentence.strip()}")
-            
-            # Extract technical contributions from key quotes
-            if paper.key_quotes:
-                for quote in paper.key_quotes[:2]:
-                    quote_text = quote.get("text", "") if isinstance(quote, dict) else quote.text
-                    if len(quote_text) > 30:
-                        technical_contributions.append(f"Technical contribution from {paper_title_clean}: {quote_text}")
-        
-        # Ensure minimum comprehensive output
-        if len(key_findings) < 5:
-            key_findings.extend([
-                f"Comprehensive analysis of {len(papers)} research documents reveals significant technical contributions in the domain of {query}",
-                f"Cross-document analysis identifies consistent methodological approaches across {len(set(p.venue for p in papers))} different research venues",
-                f"Temporal analysis shows research evolution from {min(p.year for p in papers)} to {max(p.year for p in papers)} with increasing sophistication",
-                f"Performance metrics analysis across documents indicates substantial improvements in accuracy and efficiency over time",
-                f"Implementation analysis reveals practical considerations for real-world deployment of proposed methods"
-            ])
-        
-        if len(methodology_insights) < 3:
-            methodology_insights.extend([
-                f"Methodological analysis reveals consistent use of evaluation frameworks across {len(papers)} research papers",
-                f"Comparative analysis shows evolution of experimental design from traditional baselines to comprehensive benchmarking",
-                f"Implementation strategies demonstrate increasing focus on computational efficiency and scalability considerations",
-                f"Evaluation methodologies show progression toward more rigorous statistical analysis and reproducibility standards"
-            ])
-        
-        # Generate comprehensive research gaps
-        research_gaps = [
-            f"Limited comparative analysis between different approaches identified in the {len(papers)} analyzed documents",
-            f"Insufficient evaluation on diverse datasets and real-world scenarios across the reviewed literature",
-            f"Gap in comprehensive computational efficiency analysis for practical deployment considerations",
-            f"Need for more extensive ablation studies to understand individual component contributions",
-            f"Limited investigation of robustness and generalization across different domains and conditions"
-        ]
-        
-        # Recommended papers with detailed descriptions
-        recommended_papers = []
-        for paper in top_papers[:5]:
-            paper_title_clean = paper.title.replace("Document: ", "")
-            recommended_papers.append(f"{paper_title_clean} - Key technical contribution with relevance score {paper.relevance_score:.2f}")
-        
-        # Create comprehensive fallback synthesis
-        fallback_synthesis = ResearchSynthesis(
-            research_question=f"Comprehensive research analysis for: {query}",
-            key_findings=key_findings[:12],  # Up to 12 findings
-            methodology_insights=methodology_insights[:8],  # Up to 8 insights
-            research_gaps=research_gaps[:6],  # Up to 6 gaps
-            recommended_papers=recommended_papers,
-            confidence_score=0.75,  # Higher confidence for comprehensive fallback
-            technical_contributions=technical_contributions[:8],  # Technical contributions
-            comparative_analysis=[
-                f"Comparative analysis across {len(papers)} documents reveals diverse approaches to {query}",
-                f"Performance comparison shows variation in accuracy metrics ranging across different methodologies",
-                f"Computational efficiency analysis indicates trade-offs between accuracy and processing speed"
-            ],
-            practical_implications=[
-                f"Real-world deployment considerations identified across multiple research papers",
-                f"Industry adoption challenges and implementation guidelines derived from technical analysis",
-                f"Scalability considerations for large-scale practical applications"
+            source_text = (
+                (getattr(paper, 'full_text', '') or '') or paper.abstract or ''
+            )
+            sentences = [s.strip() for s in source_text.replace('\n', ' ').split('.') if len(s.strip()) > 40]
+
+            # Score sentences by keyword overlap with the query
+            scored = []
+            for s in sentences:
+                overlap = len(query_keywords & set(s.lower().split()))
+                if overlap > 0:
+                    scored.append((overlap, s))
+            scored.sort(key=lambda x: x[0], reverse=True)
+
+            for _, sentence in scored[:3]:
+                key_findings.append(f"[{paper_title_clean}] {sentence.strip()}")
+
+            for _, sentence in scored[3:5]:
+                methodology_insights.append(f"[{paper_title_clean}] {sentence.strip()}")
+
+            for quote in paper.key_quotes[:2]:
+                qt = quote.get("text", "") if isinstance(quote, dict) else getattr(quote, 'text', '')
+                if len(qt) > 30:
+                    technical_contributions.append(f"[{paper_title_clean}] {qt}")
+
+        # If no keyword-matching sentences found, use top sentences from best paper
+        if not key_findings and top_papers:
+            best = top_papers[0]
+            source = (getattr(best, 'full_text', '') or best.abstract or '')
+            sentences = [s.strip() for s in source.replace('\n', ' ').split('.') if len(s.strip()) > 40]
+            for s in sentences[:5]:
+                key_findings.append(f"[{best.title.replace('Document: ', '')}] {s}")
+
+        # If still nothing, be honest about it
+        if not key_findings:
+            key_findings = [
+                f"The uploaded documents do not appear to contain direct information about: \"{query}\"",
+                "Try uploading documents that are specifically related to your question.",
             ]
+            methodology_insights = ["No relevant methodology found in the uploaded documents for this query."]
+            research_gaps = [f"The current document set does not cover the topic: \"{query}\""]
+        else:
+            research_gaps = [
+                "The documents may not fully cover all aspects of this question.",
+                "Consider uploading additional sources for a more complete answer.",
+            ]
+
+        if not methodology_insights:
+            methodology_insights = ["No specific methodology details found matching this query in the uploaded documents."]
+
+        recommended_papers = [
+            f"{p.title.replace('Document: ', '')} (relevance: {p.relevance_score:.2f})"
+            for p in top_papers[:5]
+        ]
+
+        fallback_synthesis = ResearchSynthesis(
+            research_question=query,
+            key_findings=key_findings[:12],
+            methodology_insights=methodology_insights[:8],
+            research_gaps=research_gaps[:5],
+            recommended_papers=recommended_papers,
+            confidence_score=0.5,
+            technical_contributions=technical_contributions[:6],
+            comparative_analysis=[],
+            practical_implications=[]
         )
-        
-        logger.info("Fallback synthesis created — findings=%d insights=%d gaps=%d contributions=%d",
+
+        logger.info("Fallback synthesis — findings=%d insights=%d gaps=%d",
                     len(fallback_synthesis.key_findings),
                     len(fallback_synthesis.methodology_insights),
-                    len(fallback_synthesis.research_gaps),
-                    len(fallback_synthesis.technical_contributions))
-        
+                    len(fallback_synthesis.research_gaps))
+
         return {
             "success": True,
             "synthesis": fallback_synthesis,
-            "llm_calls_made": 0,  # Fallback used no LLM
+            "llm_calls_made": 0,
             "papers_analyzed": len(papers),
             "fallback_used": True,
-            "synthesis_confidence": 0.75,
+            "synthesis_confidence": 0.5,
             "synthesis_completeness": self._assess_synthesis_completeness(fallback_synthesis),
-            "used_llm": False  # Flag to indicate fallback was used
+            "used_llm": False
         }
     
     def _assess_synthesis_completeness(self, synthesis: ResearchSynthesis) -> Dict[str, Any]:
