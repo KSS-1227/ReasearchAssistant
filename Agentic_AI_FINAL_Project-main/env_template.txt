@@ -1,0 +1,14 @@
+# Environment Variables Template
+# Copy this content to a file named ".env" in your project root
+
+# OpenAI API Configuration
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Other environment variables can be added here
+# STREAMLIT_SERVER_PORT=8501
+# LOG_LEVEL=INFO
+
+# Instructions:
+# 1. Create a file named ".env" (with the dot) in your project root
+# 2. Copy the content above and replace "your-openai-api-key-here" with your actual API key
+# 3. The dotenv library will automatically load these variables when you run the application

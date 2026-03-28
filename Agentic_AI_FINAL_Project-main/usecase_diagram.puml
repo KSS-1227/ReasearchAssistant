@@ -1,0 +1,163 @@
+@startuml Research_Assistant_System_UseCase
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam handwritten false
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+title Research Assistant System - Use Case Diagram\nCSYE 7374 Final Project - Hybrid Multi-Agent System
+
+' Define actors
+actor "Researcher" as researcher #lightblue
+actor "System Administrator" as admin #lightgreen
+actor "Gemini API" as gemini #orange
+actor "FAISS Vector Store" as faiss #purple
+
+' Define system boundary
+rectangle "Research Assistant System" {
+    
+    ' Document Management Use Cases
+    package "Document Management" #lightgray {
+        usecase "Upload Documents" as UC1
+        usecase "Process Documents" as UC2
+        usecase "Extract Text from PDF" as UC3
+        usecase "Create Document Chunks" as UC4
+        usecase "Generate Embeddings" as UC5
+        usecase "Store in Vector DB" as UC6
+    }
+    
+    ' Research Query Use Cases
+    package "Research Query Processing" #lightyellow {
+        usecase "Submit Research Query" as UC7
+        usecase "Search Documents" as UC8
+        usecase "Rank Results" as UC9
+        usecase "Extract Citations" as UC10
+        usecase "Extract Key Quotes" as UC11
+        usecase "Generate Synthesis" as UC12
+        usecase "Ask Follow-up Question" as UC13
+    }
+    
+    ' Analysis & Insights Use Cases
+    package "Analysis & Insights" #lightcyan {
+        usecase "View Research Synthesis" as UC14
+        usecase "View Key Findings" as UC15
+        usecase "View Research Gaps" as UC16
+        usecase "View Methodology Insights" as UC17
+        usecase "View Citation Network" as UC18
+        usecase "View Recommended Papers" as UC19
+    }
+    
+    ' System Management Use Cases
+    package "System Management" #mistyrose {
+        usecase "Monitor Performance" as UC20
+        usecase "Track LLM Calls" as UC21
+        usecase "View Cost Metrics" as UC22
+        usecase "Reset System" as UC23
+        usecase "Run Diagnostics" as UC24
+        usecase "View Agent Status" as UC25
+    }
+    
+    ' Session Management Use Cases
+    package "Session Management" #lavender {
+        usecase "Create Research Session" as UC26
+        usecase "View Session History" as UC27
+        usecase "Export Results" as UC28
+        usecase "Analyze Multiple Documents" as UC29
+    }
+}
+
+' Researcher interactions
+researcher --> UC1 : uploads
+researcher --> UC7 : submits
+researcher --> UC13 : asks
+researcher --> UC14 : views
+researcher --> UC15 : reviews
+researcher --> UC16 : identifies
+researcher --> UC17 : analyzes
+researcher --> UC18 : explores
+researcher --> UC19 : discovers
+researcher --> UC27 : checks
+researcher --> UC28 : exports
+researcher --> UC29 : analyzes
+
+' Admin interactions
+admin --> UC20 : monitors
+admin --> UC21 : tracks
+admin --> UC22 : reviews
+admin --> UC23 : resets
+admin --> UC24 : runs
+admin --> UC25 : checks
+
+' Include relationships - Document Processing Pipeline
+UC1 ..> UC2 : <<include>>
+UC2 ..> UC3 : <<include>>
+UC2 ..> UC4 : <<include>>
+UC2 ..> UC5 : <<include>>
+UC2 ..> UC6 : <<include>>
+
+' Include relationships - Research Query Pipeline
+UC7 ..> UC8 : <<include>>
+UC8 ..> UC9 : <<include>>
+UC7 ..> UC10 : <<include>>
+UC7 ..> UC11 : <<include>>
+UC7 ..> UC12 : <<include>>
+UC7 ..> UC26 : <<include>>
+
+' Include relationships - Analysis
+UC14 ..> UC15 : <<include>>
+UC14 ..> UC16 : <<include>>
+UC14 ..> UC17 : <<include>>
+
+' Include relationships - Monitoring
+UC20 ..> UC21 : <<include>>
+UC20 ..> UC22 : <<include>>
+
+' Extend relationships
+UC13 ..> UC7 : <<extend>>
+UC29 ..> UC1 : <<extend>>
+UC28 ..> UC27 : <<extend>>
+
+' External system interactions
+UC5 --> gemini : uses
+UC12 --> gemini : uses
+UC6 --> faiss : stores
+UC8 --> faiss : queries
+
+' Notes for key features
+note right of UC2
+  <b>Document Processor Agent</b>
+  - 0 LLM calls
+  - Uses LangChain
+  - Creates FAISS index
+end note
+
+note right of UC8
+  <b>Literature Scanner Agent</b>
+  - 0 LLM calls
+  - Semantic search
+  - Relevance ranking
+end note
+
+note right of UC10
+  <b>Citation Extractor Agent</b>
+  - 0 LLM calls
+  - Regex-based extraction
+  - Metadata enhancement
+end note
+
+note right of UC12
+  <b>Synthesis Agent</b>
+  - 1 LLM call per query
+  - Structured output
+  - Confidence scoring
+end note
+
+note bottom of "Research Assistant System"
+  <b>System Efficiency:</b>
+  • Total: 1 LLM call per research query
+  • 3 Deterministic agents (0 LLM calls)
+  • 1 LLM-powered agent (1 LLM call)
+  • Cost: ~$0.002 per query
+end note
+
+@enduml
