@@ -1,5 +1,4 @@
 # 🔬 Research Assistant AI
-**CSYE 7374 Final Project — Summer 2025**
 
 A hybrid multi-agent RAG system that processes academic documents and generates research synthesis using **exactly 1 LLM call per query**.
 
