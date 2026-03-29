@@ -882,10 +882,10 @@ def render_question_section():
         if st.session_state.get('research_system'):
             with st.spinner('Generating question suggestions from your paper...'):
                 qs = generate_recommended_questions(st.session_state.research_system)
-                st.session_state.recommended_questions = qs
-                st.session_state.recs_generated = True
-                if qs:
-                    st.rerun()
+            # Set state AFTER spinner exits, then rerun once to render pills
+            st.session_state.recommended_questions = qs
+            st.session_state.recs_generated = True
+            st.rerun()
 
     recs = st.session_state.get('recommended_questions', [])
     if recs:
