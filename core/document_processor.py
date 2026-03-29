@@ -1,11 +1,9 @@
-```
 """
 Document Processor with LangChain Integration
 
 Uses LangChain for document loading and FAISS for vector storage
 with Google embeddings for 100% Google ecosystem integration.
 """
-```
 
 import os
 import tempfile
