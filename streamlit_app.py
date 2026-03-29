@@ -898,12 +898,17 @@ def render_question_section():
                 {'role': 'system', 'content': 'Respond ONLY with a valid JSON array of exactly 6 question strings. No markdown, no explanation.'},
                 {'role': 'user', 'content': 'Generate exactly 6 specific research questions from this paper content. Return ONLY a JSON array: ["Q1?","Q2?","Q3?","Q4?","Q5?","Q6?"]\n\nPaper:\nThis is a test abstract about deep learning and transformers.'}
             ]
+            import traceback
             try:
                 resp = llm.make_call(messages, json_mode=False)
-                st.write('**LLM response:**', getattr(resp, 'content', None))
+                if resp is None:
+                    st.error('LLM response: None')
+                    st.code('No response returned. This may indicate a network, quota, or dependency issue.\nCheck the Streamlit terminal for errors.')
+                else:
+                    st.write('**LLM response:**', getattr(resp, 'content', None))
             except Exception as e:
-                import traceback
-                st.error(f'LLM call failed: {e}\n{traceback.format_exc()}')
+                st.error(f'LLM call failed: {e}')
+                st.code(traceback.format_exc())
 
     """Step 3: Ask Research Questions"""
 
