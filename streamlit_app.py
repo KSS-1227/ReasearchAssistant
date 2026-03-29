@@ -798,8 +798,9 @@ def generate_recommended_questions(coordinator) -> list:
     # ── Step 1: Extract real content from FAISS ───────────────────────────
     try:
         dp = coordinator.document_processor
-        if not dp or not dp.vector_store:
-            print("[RECS] No vector store available")
+        stats = dp.get_processing_stats()
+        if not stats.get('vector_store_initialized', False):
+            print('[RECS] Vector store not initialized - documents not processed yet')
             return []
 
         results = dp.search_documents(
@@ -848,7 +849,7 @@ def generate_recommended_questions(coordinator) -> list:
 
         from google.genai import types as _types
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",
             contents=prompt,
             config=_types.GenerateContentConfig(
                 temperature=0.7,
