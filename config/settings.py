@@ -74,13 +74,13 @@ class SystemConfig:
         "max_documents": 100,
         "supported_formats": [".pdf", ".txt", ".md"],
         "vector_store_type": "FAISS",
-        "embedding_model": "models/embedding-001"   # Google Gemini embedding model
+        "embedding_model": "models/text-embedding-004"  # Google Gemini embedding model
     }
 
     # RAG pipeline constants (replaces magic numbers scattered across files)
     RAG_CONFIG = {
         "max_full_text_chars": 30_000,    # max chars sent per doc to LLM
-        "embedding_dimension": 768,        # Google embedding-001 output size
+        "embedding_dimension": 768,        # text-embedding-004 output size
         "max_references_parsed": 20,       # citation extractor reference limit
         "max_quotes_per_paper": 5,         # quotes included in LLM context
         "heading_max_length": 80,          # chars before heading is truncated

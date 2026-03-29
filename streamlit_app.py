@@ -789,102 +789,113 @@ def process_documents():
 
 def generate_recommended_questions(coordinator) -> list:
     """
-    Generate 6 specific research questions from actual uploaded paper content.
-    Uses FAISS to get real text, then the existing working LLM to generate questions.
-    No hardcoded model names - uses whatever model is already configured and working.
+    Generate 6 specific research questions from uploaded paper content.
+    Reads directly from document processor's stored chunks (no FAISS/embeddings needed).
+    Uses gemini-2.5-flash via the existing working LLM interface.
     """
     import json as _json
 
-    # ── Step 1: Extract real content from FAISS ──────────────────────────────
+    # ── Step 1: Read raw text directly from stored document chunks ────────────
     try:
-        dp    = coordinator.document_processor
+        dp = coordinator.document_processor
         stats = dp.get_processing_stats()
-        if not stats.get('vector_store_initialized', False):
-            print('[RECS] Vector store not ready')
+
+        if not stats.get('total_chunks', 0):
+            print('[RECS] No document chunks available')
             return []
 
-        results = dp.search_documents(
-            "introduction abstract methodology results findings conclusion", k=8
-        )
-        if not results:
-            print('[RECS] FAISS returned no results')
+        # Read directly from dp.documents (LangChain Document objects)
+        # No FAISS search, no embeddings — just raw stored text
+        raw_docs = getattr(dp, 'documents', [])
+        if not raw_docs:
+            print('[RECS] dp.documents is empty')
             return []
 
-        snippets, total = [], 0
-        for r in results:
-            chunk = r.get('content', '').strip()
-            if chunk and total < 2500:
-                snippets.append(chunk[:400])
-                total += len(chunk[:400])
+        # Take first 8 chunks spread across the document
+        step = max(1, len(raw_docs) // 8)
+        selected = raw_docs[::step][:8]
+
+        snippets = []
+        total = 0
+        for doc in selected:
+            text = getattr(doc, 'page_content', '').strip()
+            if text and total < 2500:
+                snippets.append(text[:400])
+                total += len(text[:400])
 
         paper_text = '\n\n'.join(snippets)
         if len(paper_text) < 50:
-            print('[RECS] Text too short')
+            print('[RECS] Extracted text too short')
             return []
 
-        print(f'[RECS] Got {len(paper_text)} chars from {len(snippets)} FAISS chunks')
+        print(f'[RECS] Read {len(paper_text)} chars from {len(snippets)} chunks (direct, no FAISS)')
 
     except Exception as e:
-        print(f'[RECS] FAISS error: {e}')
+        print(f'[RECS] Text extraction error: {e}')
+        import traceback; traceback.print_exc()
         return []
 
-    # ── Step 2: Use the existing working LLM (no hardcoded model) ────────────
+    # ── Step 2: Call gemini-2.5-flash via existing LLM interface ─────────────
     try:
-        prompt = (
-            "You are a research assistant. Read these research paper excerpts carefully.\n"
-            "Generate exactly 6 specific, insightful questions a researcher would ask about THIS paper.\n\n"
-            "Requirements:\n"
-            "- Each question must be SPECIFIC to the content below (not generic)\n"
-            "- Cover: main findings, methodology, contributions, limitations, comparisons, future work\n"
-            "- Keep each question under 15 words\n"
-            "- Respond with ONLY a JSON array of 6 question strings\n\n"
-            f"Paper content:\n{paper_text}\n\n"
-            'Respond with ONLY this format (no explanation): ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?", "Q6?"]'
-        )
-
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You generate specific research questions from paper content. "
+                    "You are a research assistant. "
                     "Always respond with a valid JSON array of exactly 6 question strings. "
-                    "No markdown, no explanation, just the JSON array."
+                    "No markdown, no explanation, just the raw JSON array."
                 )
             },
-            {"role": "user", "content": prompt}
+            {
+                "role": "user",
+                "content": (
+                    "Read these research paper excerpts and generate exactly 6 specific, "
+                    "insightful questions a researcher would want to ask about this paper.\n\n"
+                    "Rules:\n"
+                    "- Questions MUST be specific to the content (not generic)\n"
+                    "- Cover: findings, methodology, contributions, limitations, comparisons, future work\n"
+                    "- Each question under 15 words\n"
+                    "- Return ONLY a JSON array of 6 strings\n\n"
+                    f"Paper content:\n{paper_text}\n\n"
+                    'Output (JSON array only): ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?", "Q6?"]'
+                )
+            }
         ]
 
         response = coordinator.llm.make_call(messages)
         if not response:
-            print('[RECS] LLM returned no response')
+            print('[RECS] LLM returned None')
             return []
 
         raw = response.content.strip()
-        print(f'[RECS] Raw LLM output: {raw[:300]}')
+        print(f'[RECS] LLM raw output: {raw[:300]}')
 
-        # Clean markdown fences
-        raw = re.sub(r'```(?:json)?\s*', '', raw).strip()
-        raw = re.sub(r'```', '', raw).strip()
+        # Strip markdown fences
+        raw = re.sub(r'```(?:json)?\s*', '', raw).strip().strip('`').strip()
 
-        # Extract JSON array
+        # Extract JSON array robustly
         match = re.search(r'\[.*?\]', raw, re.DOTALL)
         if match:
-            raw = match.group(0)
+            questions = _json.loads(match.group(0))
+            if isinstance(questions, list):
+                clean = [str(q).strip() for q in questions if str(q).strip()]
+                print(f'[RECS] Generated {len(clean)} questions successfully')
+                return clean[:6]
 
+        # Fallback: try parsing the whole response
         questions = _json.loads(raw)
         if isinstance(questions, list):
-            clean = [str(q).strip() for q in questions if str(q).strip()]
-            print(f'[RECS] Successfully generated {len(clean)} questions')
-            return clean[:6]
+            return [str(q).strip() for q in questions if str(q).strip()][:6]
 
-        print('[RECS] Parsed result is not a list')
+        print(f'[RECS] Could not parse JSON from: {raw[:200]}')
         return []
 
     except _json.JSONDecodeError as e:
-        print(f'[RECS] JSON parse error: {e} | raw was: {raw[:200]}')
+        print(f'[RECS] JSON parse error: {e}')
         return []
     except Exception as e:
         print(f'[RECS] LLM error: {e}')
+        import traceback; traceback.print_exc()
         return []
 
 
@@ -919,7 +930,9 @@ def render_question_section():
         with st.spinner('🧠 Analyzing your documents to suggest relevant questions...'):
             qs = generate_recommended_questions(st.session_state.research_system)
             st.session_state.recommended_questions = qs
-            st.session_state.recs_generated = True
+            # Only lock as generated if we actually got questions
+            # If empty, allow retry on next render
+            st.session_state.recs_generated = len(qs) > 0
 
     if st.session_state.recommended_questions:
         st.markdown("""<div style='background:linear-gradient(135deg,#1e3a5f,#0d2137);
