@@ -223,10 +223,6 @@ def initialize_session_state():
         st.session_state.current_question = ""
 
         st.session_state.analyze_additional = False  # Flag for analyzing another document
-        st.session_state.recommended_questions = []   # Smart question recommendations
-        st.session_state.selected_recommendation = '' # Clicked recommendation pill
-        st.session_state.recommended_questions = []   # Smart question recommendations
-        st.session_state.selected_recommendation = '' # Clicked recommendation pill
 
         
 
@@ -242,6 +238,15 @@ def initialize_session_state():
 
         }
 
+
+
+    # Always ensure recommendation state exists (survives reruns)
+    if 'recommended_questions' not in st.session_state:
+        st.session_state.recommended_questions = []
+    if 'selected_recommendation' not in st.session_state:
+        st.session_state.selected_recommendation = ''
+    if 'recs_generated' not in st.session_state:
+        st.session_state.recs_generated = False
 
 
 def render_header():
@@ -784,74 +789,95 @@ def process_documents():
 
 def generate_recommended_questions(coordinator) -> list:
     """
-    Generate research questions directly from uploaded paper content using LLM.
-    Extracts real text from FAISS, sends to Gemini, returns 6 specific questions.
+    Generate 6 research questions from actual uploaded paper content.
+    Uses FAISS to extract real text, then Gemini to generate specific questions.
     """
-    import json
+    import json as _json
+    from google import genai as _genai
 
-    # Step 1: Pull representative content from the vector store
+    # ── Step 1: Extract real content from FAISS ───────────────────────────
     try:
         dp = coordinator.document_processor
-        broad_results = dp.search_documents("research methodology findings results conclusion", k=6)
-        if not broad_results:
+        if not dp or not dp.vector_store:
+            print("[RECS] No vector store available")
             return []
 
-        # Collect up to ~2000 chars of real paper content
-        snippets = []
-        total_chars = 0
-        for r in broad_results:
+        results = dp.search_documents(
+            "introduction abstract methodology results findings conclusion", k=8
+        )
+        if not results:
+            print("[RECS] FAISS returned no results")
+            return []
+
+        snippets, total = [], 0
+        for r in results:
             chunk = r.get("content", "").strip()
-            if chunk and total_chars < 2000:
-                snippets.append(chunk[:400])
-                total_chars += len(chunk[:400])
+            if chunk and total < 3000:
+                snippets.append(chunk[:500])
+                total += len(chunk[:500])
 
-        combined_text = "\n\n".join(snippets)
-        if not combined_text:
+        paper_text = "\n\n---\n\n".join(snippets)
+        if len(paper_text) < 50:
+            print("[RECS] Extracted text too short")
             return []
+
+        print(f"[RECS] Extracted {len(paper_text)} chars from {len(snippets)} chunks")
+
     except Exception as e:
-        print(f"FAISS extraction failed: {e}")
+        print(f"[RECS] FAISS extraction error: {e}")
         return []
 
-    # Step 2: Ask LLM to generate questions from the actual content
-    prompt = f"""You are a research assistant. Based on the following excerpts from a research paper, 
-generate exactly 6 specific, insightful research questions that a researcher would want to ask about this paper.
-
-The questions must be:
-- Specific to the content below (not generic)
-- Varied: cover findings, methodology, comparisons, limitations, applications
-- Concise (under 15 words each)
-- Directly answerable from the paper
-
-Paper content:
-{combined_text}
-
-Respond ONLY with a valid JSON array of 6 strings. Example format:
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?"]"""
-
+    # ── Step 2: Call Gemini directly (plain text, no JSON mode) ──────────
     try:
-        messages = [
-            {"role": "system", "content": "You generate research questions from paper content. Always respond with a valid JSON array of strings only."},
-            {"role": "user",   "content": prompt}
-        ]
-        response = coordinator.llm.make_call(messages)
-        if not response:
-            return []
+        api_key = coordinator.llm.api_key
+        client  = _genai.Client(api_key=api_key)
 
-        raw = response.content.strip()
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
+        prompt = (
+            "You are an expert research assistant.\n"
+            "Read the following excerpts from a research paper and generate exactly 6 "
+            "insightful questions a researcher would want to ask about this specific paper.\n\n"
+            "Rules:\n"
+            "- Questions MUST be specific to the content below, not generic\n"
+            "- Cover: main findings, methodology, key contributions, limitations, "
+            "comparisons, and future directions\n"
+            "- Each question must be under 15 words\n"
+            "- Return ONLY a JSON array of 6 strings, nothing else\n\n"
+            f"Paper excerpts:\n{paper_text}\n\n"
+            'Output format: ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?", "Q6?"]'
+        )
 
-        questions = json.loads(raw)
+        from google.genai import types as _types
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=_types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=512,
+            )
+        )
+
+        raw = response.text.strip()
+        print(f"[RECS] Raw LLM response: {raw[:200]}")
+
+        # Strip markdown fences if present
+        if "```" in raw:
+            raw = re.sub(r"```(?:json)?", "", raw).strip()
+
+        # Extract JSON array
+        match = re.search(r'\[.*?\]', raw, re.DOTALL)
+        if match:
+            raw = match.group(0)
+
+        questions = _json.loads(raw)
         if isinstance(questions, list):
-            return [q for q in questions if isinstance(q, str) and q.strip()][:6]
+            clean = [q.strip() for q in questions if isinstance(q, str) and q.strip()]
+            print(f"[RECS] Generated {len(clean)} questions successfully")
+            return clean[:6]
+
         return []
 
     except Exception as e:
-        print(f"LLM question generation failed: {e}")
+        print(f"[RECS] LLM generation error: {e}")
         return []
 
 
@@ -881,24 +907,30 @@ def render_question_section():
 
     
 
-    # ── Generate recommendations once ──────────────────────────────────────
-    if not st.session_state.get('recommended_questions') and st.session_state.research_system:
-        with st.spinner("💡 Generating question recommendations from your documents..."):
-            st.session_state.recommended_questions = generate_recommended_questions(
-                st.session_state.research_system
-            )
+    # ── Smart Question Recommendations ────────────────────────────────────
+    if not st.session_state.recs_generated and st.session_state.research_system:
+        with st.spinner('🧠 Analyzing your documents to suggest relevant questions...'):
+            qs = generate_recommended_questions(st.session_state.research_system)
+            st.session_state.recommended_questions = qs
+            st.session_state.recs_generated = True
 
-    # ── Render recommendation pills ──────────────────────────────────────────
-    if st.session_state.get('recommended_questions'):
-        st.markdown("#### 💡 Suggested Questions")
-        st.caption("Click any question below to use it as your research query:")
-        cols = st.columns(3)
+    if st.session_state.recommended_questions:
+        st.markdown("""<div style='background:linear-gradient(135deg,#1e3a5f,#0d2137);
+            border-radius:12px;padding:16px 20px;margin-bottom:16px;border:1px solid #2d5a8e'>
+            <p style='color:#64b5f6;font-weight:700;font-size:1rem;margin:0 0 12px 0'>
+            💡 Suggested Questions Based on Your Paper</p></div>""",
+            unsafe_allow_html=True)
+        cols = st.columns(2)
         for idx, q in enumerate(st.session_state.recommended_questions):
-            with cols[idx % 3]:
-                if st.button(q, key=f"rec_{idx}", use_container_width=True):
+            with cols[idx % 2]:
+                if st.button(f'🔹 {q}', key=f'rec_{idx}', use_container_width=True,
+                             help='Click to use this question'):
                     st.session_state.selected_recommendation = q
                     st.rerun()
-        st.markdown("---")
+        st.markdown('---')
+    elif st.session_state.recs_generated:
+        st.info('💡 No recommendations generated — ask your own question below.')
+        st.markdown('---')
 
     # Pre-fill textarea from clicked recommendation
     prefill = st.session_state.get('selected_recommendation', '')
@@ -947,11 +979,9 @@ def render_question_section():
 
         
 
-    # Clear prefill after submit
+    # Clear prefill and process after submit
     if submitted:
-        st.session_state.selected_recommendation = ""
-
-    # Process research question
+        st.session_state.selected_recommendation = ''
     if submitted and research_question:
         process_research_question(research_question, max_results)
 
