@@ -795,6 +795,7 @@ def generate_recommended_questions(coordinator) -> list:
     import json as _j
     import re as _re
     import streamlit as _st
+    import traceback
 
     _st.session_state['recs_debug'] = {}
     dbg = _st.session_state['recs_debug']
@@ -806,6 +807,7 @@ def generate_recommended_questions(coordinator) -> list:
 
         if not raw_docs:
             dbg['error'] = 'dp.documents is empty'
+            _st.error('No documents found. Please upload and process at least one research paper.')
             return []
 
         step     = max(1, len(raw_docs) // 8)
@@ -813,15 +815,17 @@ def generate_recommended_questions(coordinator) -> list:
         parts, total = [], 0
         for doc in selected:
             t = getattr(doc, 'page_content', '').strip()
-            if t and total < 2500:
-                parts.append(t[:400])
-                total += len(t[:400])
+            if t and total < 2000:  # Limit total input to 2000 chars for safety
+                part = t[:400]
+                parts.append(part)
+                total += len(part)
 
         paper_text = '\n\n'.join(parts)
         dbg['2_paper_text_len'] = len(paper_text)
 
         if len(paper_text) < 50:
             dbg['error'] = 'paper_text too short'
+            _st.error('The uploaded documents are too short or empty for question generation.')
             return []
 
         messages = [
@@ -839,40 +843,67 @@ def generate_recommended_questions(coordinator) -> list:
             }
         ]
 
-        resp = coordinator.llm.make_call(messages)
+        resp = coordinator.llm.make_call(messages, json_mode=False)
         dbg['3_llm_resp'] = str(resp.content[:200]) if resp else 'None'
 
         if not resp:
             dbg['error'] = 'LLM returned None'
+            _st.error('The language model did not return any questions. This may be due to API rate limits, quota exhaustion, or a temporary service issue. Please try again later or reduce the number/size of documents.')
             return []
 
         raw = resp.content.strip()
         raw = _re.sub(r'```[a-z]*', '', raw).strip().strip('`').strip()
         dbg['4_raw_cleaned'] = raw[:200]
 
-        m = _re.search(r'\[([\s\S]*?)\]', raw)
-        if m:
-            qs = _j.loads('[' + m.group(1) + ']')
+        try:
+            m = _re.search(r'\[([\s\S]*?)\]', raw)
+            if m:
+                qs = _j.loads('[' + m.group(1) + ']')
+                if isinstance(qs, list):
+                    result = [str(q).strip() for q in qs if str(q).strip()][:6]
+                    dbg['5_questions'] = result
+                    return result
+
+            qs = _j.loads(raw)
             if isinstance(qs, list):
                 result = [str(q).strip() for q in qs if str(q).strip()][:6]
                 dbg['5_questions'] = result
                 return result
-
-        qs = _j.loads(raw)
-        if isinstance(qs, list):
-            result = [str(q).strip() for q in qs if str(q).strip()][:6]
-            dbg['5_questions'] = result
-            return result
+        except Exception as parse_exc:
+            dbg['error'] = f'ParseError: {type(parse_exc).__name__}: {str(parse_exc)[:200]} | Raw: {raw[:100]}'
+            _st.error('Failed to parse the questions from the language model. Please try again or check the document content.')
+            return []
 
         dbg['error'] = 'Could not parse JSON from: ' + raw[:100]
+        _st.error('The language model response could not be parsed as a list of questions. Please try again or check your document content.')
         return []
 
     except Exception as _e:
-        dbg['error'] = type(_e).__name__ + ': ' + str(_e)[:200]
+        dbg['error'] = type(_e).__name__ + ': ' + str(_e)[:200] + '\n' + traceback.format_exc()
+        _st.error('An unexpected error occurred during question generation. Please try again or contact support.')
         return []
 
 
 def render_question_section():
+    # ── LLM/Key Debugging (TEMPORARY) ───────────────────────────────
+    import os
+    st.markdown('---')
+    with st.expander('🔧 LLM/API Key Debug (for developers)', expanded=False):
+        api_key = os.environ.get('GEMINI_API_KEY', '(not set)')
+        st.write('**GEMINI_API_KEY:**', api_key[:8] + '...' if api_key and len(api_key) > 8 else api_key)
+        if st.button('Test LLM Call (Minimal)', key='llm_test_button'):
+            from core.llm_interface import LLMInterface
+            llm = LLMInterface(api_key=api_key)
+            messages = [
+                {'role': 'system', 'content': 'Respond ONLY with a valid JSON array of exactly 6 question strings. No markdown, no explanation.'},
+                {'role': 'user', 'content': 'Generate exactly 6 specific research questions from this paper content. Return ONLY a JSON array: ["Q1?","Q2?","Q3?","Q4?","Q5?","Q6?"]\n\nPaper:\nThis is a test abstract about deep learning and transformers.'}
+            ]
+            try:
+                resp = llm.make_call(messages, json_mode=False)
+                st.write('**LLM response:**', getattr(resp, 'content', None))
+            except Exception as e:
+                import traceback
+                st.error(f'LLM call failed: {e}\n{traceback.format_exc()}')
 
     """Step 3: Ask Research Questions"""
 

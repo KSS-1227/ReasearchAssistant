@@ -108,6 +108,7 @@ class LLMInterface:
         messages: List[Dict],
         response_format: Optional[Dict] = None,  # kept for interface compatibility
         model: str = None,
+        json_mode: bool = True,
     ) -> Optional[GeminiResponse]:
         """
         Make a single LLM call with automatic retry on transient errors.
@@ -147,7 +148,7 @@ class LLMInterface:
             system_instruction="\n\n".join(system_parts) if system_parts else None,
             temperature=0.2,
             max_output_tokens=SystemConfig.SYNTHESIS_CONFIG["max_tokens"],
-            response_mime_type="application/json",
+            response_mime_type="application/json" if json_mode else "text/plain",
         )
 
         last_exc: Optional[Exception] = None
