@@ -492,6 +492,9 @@ def render_sidebar():
                 st.session_state.uploaded_files = []
 
                 st.session_state.documents_processed = False
+                st.session_state.recommended_questions = []
+                st.session_state.recs_generated = False
+                st.session_state.selected_recommendation = ''
 
                 st.session_state.research_questions = []
 
@@ -1192,6 +1195,9 @@ def render_question_section():
             st.session_state.current_step = "upload"
 
             st.session_state.analyze_additional = True
+            st.session_state.recommended_questions = []
+            st.session_state.recs_generated = False
+            st.session_state.selected_recommendation = ''
 
             st.rerun()
 
@@ -1206,6 +1212,9 @@ def render_question_section():
             st.session_state.uploaded_files = []
 
             st.session_state.documents_processed = False
+            st.session_state.recommended_questions = []
+            st.session_state.recs_generated = False
+            st.session_state.selected_recommendation = ''
 
             st.session_state.research_questions = []
 
