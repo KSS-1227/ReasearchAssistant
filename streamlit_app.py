@@ -885,30 +885,6 @@ def generate_recommended_questions(coordinator) -> list:
 
 
 def render_question_section():
-    # ── LLM/Key Debugging (TEMPORARY) ───────────────────────────────
-    import os
-    st.markdown('---')
-    with st.expander('🔧 LLM/API Key Debug (for developers)', expanded=False):
-        api_key = os.environ.get('GEMINI_API_KEY', '(not set)')
-        st.write('**GEMINI_API_KEY:**', api_key[:8] + '...' if api_key and len(api_key) > 8 else api_key)
-        if st.button('Test LLM Call (Minimal)', key='llm_test_button'):
-            from core.llm_interface import LLMInterface
-            llm = LLMInterface(api_key=api_key)
-            messages = [
-                {'role': 'system', 'content': 'Respond ONLY with a valid JSON array of exactly 6 question strings. No markdown, no explanation.'},
-                {'role': 'user', 'content': 'Generate exactly 6 specific research questions from this paper content. Return ONLY a JSON array: ["Q1?","Q2?","Q3?","Q4?","Q5?","Q6?"]\n\nPaper:\nThis is a test abstract about deep learning and transformers.'}
-            ]
-            import traceback
-            try:
-                resp = llm.make_call(messages, json_mode=False)
-                if resp is None:
-                    st.error('LLM response: None')
-                    st.code('No response returned. This may indicate a network, quota, or dependency issue.\nCheck the Streamlit terminal for errors.')
-                else:
-                    st.write('**LLM response:**', getattr(resp, 'content', None))
-            except Exception as e:
-                st.error(f'LLM call failed: {e}')
-                st.code(traceback.format_exc())
 
     """Step 3: Ask Research Questions"""
 
