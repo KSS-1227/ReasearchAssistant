@@ -878,14 +878,16 @@ def render_question_section():
     
 
     # ── Smart Question Recommendations ─────────────────────────────────────
-    if not st.session_state.get('recs_generated', False):
-        if st.session_state.get('research_system'):
-            with st.spinner('Generating question suggestions from your paper...'):
-                qs = generate_recommended_questions(st.session_state.research_system)
-            # Set state AFTER spinner exits, then rerun once to render pills
-            st.session_state.recommended_questions = qs
-            st.session_state.recs_generated = True
-            st.rerun()
+    _recs_done = st.session_state.get('recs_generated', False)
+    _sys       = st.session_state.get('research_system')
+    _dp_docs   = len(getattr(getattr(_sys, 'document_processor', None), 'documents', [])) if _sys else 0
+
+    if not _recs_done and _sys:
+        with st.spinner('Generating question suggestions from your paper...'):
+            qs = generate_recommended_questions(_sys)
+        st.session_state.recommended_questions = qs
+        st.session_state.recs_generated = True
+        st.rerun()
 
     recs = st.session_state.get('recommended_questions', [])
     if recs:
@@ -897,6 +899,17 @@ def render_question_section():
                     st.session_state.selected_recommendation = q
                     st.rerun()
         st.divider()
+    else:
+        # DEBUG: show state so we can diagnose
+        with st.expander('DEBUG: Recommendation State', expanded=True):
+            st.write('recs_generated:', _recs_done)
+            st.write('dp.documents count:', _dp_docs)
+            st.write('recommended_questions:', recs)
+            st.write('research_system exists:', _sys is not None)
+            if st.button('Force Regenerate Questions'):
+                st.session_state.recs_generated = False
+                st.session_state.recommended_questions = []
+                st.rerun()
 
 
     # Pre-fill textarea from clicked recommendation
