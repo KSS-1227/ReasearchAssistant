@@ -1,6 +1,5 @@
 """
 Synthesis Agent - Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Agent 3: Synthesizes research findings using LLM - EXACTLY 1 LLM call per query.
 This is the ONLY agent that uses LLMs in the entire system.

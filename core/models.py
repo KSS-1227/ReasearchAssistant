@@ -1,6 +1,5 @@
 """
 Data models for the Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 """
 
 from typing import List, Dict, Optional, Any

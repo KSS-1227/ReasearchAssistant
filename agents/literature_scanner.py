@@ -1,10 +1,11 @@
+```
 """
 Literature Scanner Agent - Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Agent 1: Searches and ranks papers using deterministic vector similarity.
 NO LLM calls - pure algorithmic approach for cost efficiency.
 """
+```
 
 import re
 import math

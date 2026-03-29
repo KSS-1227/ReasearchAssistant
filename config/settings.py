@@ -1,6 +1,5 @@
 """
 Configuration settings for the Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 """
 
 import os

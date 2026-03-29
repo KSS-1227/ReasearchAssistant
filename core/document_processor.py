@@ -1,10 +1,11 @@
+```
 """
 Document Processor with LangChain Integration
-CSYE 7374 Final Project - Summer 2025
 
 Uses LangChain for document loading and FAISS for vector storage
 with Google embeddings for 100% Google ecosystem integration.
 """
+```
 
 import os
 import tempfile

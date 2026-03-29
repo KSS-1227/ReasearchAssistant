@@ -1,6 +1,5 @@
 """
 Centralized LLM Interface for Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Centralized LLM management with:
 - google.genai SDK (replaces deprecated google.generativeai)

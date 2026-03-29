@@ -255,7 +255,7 @@ def render_header():
 
     st.markdown('<div class="main-header">🔬 Research Assistant AI</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="sub-header"><strong>CSYE 7374 Final Project</strong> | <em>Hybrid Multi-Agent Research System</em></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header"><em>Hybrid Multi-Agent Research System</em></div>', unsafe_allow_html=True)
 
     
 

@@ -1,6 +1,5 @@
 """
 Session Memory Management for Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Handles session state, research history, and performance tracking.
 """

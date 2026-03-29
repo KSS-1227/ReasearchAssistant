@@ -1,6 +1,5 @@
 """
 Prompt templates for the Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Single source of truth for all LLM prompt construction.
 Kept separate from llm_interface.py so prompts can be

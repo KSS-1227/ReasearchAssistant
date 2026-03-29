@@ -1,5 +1,5 @@
+```
 # Research Assistant System - Use Case Diagram
-**CSYE 7374 Final Project - Hybrid Multi-Agent System**
 
 ## System Overview
 A hybrid multi-agent research assistant that processes academic documents and generates research synthesis with exactly 1 LLM call per query.

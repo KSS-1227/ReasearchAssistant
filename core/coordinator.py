@@ -1,6 +1,5 @@
 """
 Research Coordinator - Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Main coordinator that orchestrates all agents using deterministic routing.
 NO LLM calls - uses pure logic for agent coordination.

@@ -1,6 +1,5 @@
 """
 Base Agent Class for Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Provides common interface and functionality for all agents.
 """

@@ -1,6 +1,5 @@
 """
 Google Embeddings for Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Uses google.genai SDK (replaces deprecated google.generativeai).
 Compatible with LangChain's Embeddings interface for FAISS integration.

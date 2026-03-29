@@ -1,6 +1,5 @@
 """
 FIXED Citation Extractor Agent - Research Assistant System
-CSYE 7374 Final Project - Summer 2025
 
 Enhanced version with better PDF content processing and citation extraction.
 """
