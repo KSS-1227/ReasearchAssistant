@@ -791,13 +791,21 @@ def process_documents():
 
 
 def generate_recommended_questions(coordinator) -> list:
-    """Generate 6 questions from paper content via Gemini. No FAISS needed."""
-    import json as _j, re as _re
+    """Generate 6 questions from paper content. Returns (questions_list, error_string)."""
+    import json as _j
+    import re as _re
+    import streamlit as _st
+
+    _st.session_state['recs_debug'] = {}
+    dbg = _st.session_state['recs_debug']
 
     try:
         dp       = coordinator.document_processor
         raw_docs = getattr(dp, 'documents', [])
+        dbg['1_raw_docs_count'] = len(raw_docs)
+
         if not raw_docs:
+            dbg['error'] = 'dp.documents is empty'
             return []
 
         step     = max(1, len(raw_docs) // 8)
@@ -810,7 +818,10 @@ def generate_recommended_questions(coordinator) -> list:
                 total += len(t[:400])
 
         paper_text = '\n\n'.join(parts)
+        dbg['2_paper_text_len'] = len(paper_text)
+
         if len(paper_text) < 50:
+            dbg['error'] = 'paper_text too short'
             return []
 
         messages = [
@@ -822,32 +833,42 @@ def generate_recommended_questions(coordinator) -> list:
                 "role": "user",
                 "content": (
                     "Generate exactly 6 specific research questions from this paper content.\n"
-                    "Return ONLY a JSON array like: [\"Q1?\",\"Q2?\",\"Q3?\",\"Q4?\",\"Q5?\",\"Q6?\"]\n\n"
+                    "Return ONLY a JSON array: [\"Q1?\",\"Q2?\",\"Q3?\",\"Q4?\",\"Q5?\",\"Q6?\"]\n\n"
                     f"Paper:\n{paper_text}"
                 )
             }
         ]
 
         resp = coordinator.llm.make_call(messages)
+        dbg['3_llm_resp'] = str(resp.content[:200]) if resp else 'None'
+
         if not resp:
+            dbg['error'] = 'LLM returned None'
             return []
 
         raw = resp.content.strip()
-        # strip fences
         raw = _re.sub(r'```[a-z]*', '', raw).strip().strip('`').strip()
-        # find array
-        m = _re.search(r'\[[\s\S]*?\]', raw)
+        dbg['4_raw_cleaned'] = raw[:200]
+
+        m = _re.search(r'\[([\s\S]*?)\]', raw)
         if m:
-            qs = _j.loads(m.group(0))
+            qs = _j.loads('[' + m.group(1) + ']')
             if isinstance(qs, list):
-                return [str(q).strip() for q in qs if str(q).strip()][:6]
-        # last resort
+                result = [str(q).strip() for q in qs if str(q).strip()][:6]
+                dbg['5_questions'] = result
+                return result
+
         qs = _j.loads(raw)
         if isinstance(qs, list):
-            return [str(q).strip() for q in qs if str(q).strip()][:6]
+            result = [str(q).strip() for q in qs if str(q).strip()][:6]
+            dbg['5_questions'] = result
+            return result
+
+        dbg['error'] = 'Could not parse JSON from: ' + raw[:100]
         return []
 
-    except Exception:
+    except Exception as _e:
+        dbg['error'] = type(_e).__name__ + ': ' + str(_e)[:200]
         return []
 
 
@@ -906,9 +927,15 @@ def render_question_section():
             st.write('dp.documents count:', _dp_docs)
             st.write('recommended_questions:', recs)
             st.write('research_system exists:', _sys is not None)
+            dbg = st.session_state.get('recs_debug', {})
+            if dbg:
+                st.write('--- Generation Debug ---')
+                for k, v in dbg.items():
+                    st.write(f'{k}:', v)
             if st.button('Force Regenerate Questions'):
                 st.session_state.recs_generated = False
                 st.session_state.recommended_questions = []
+                st.session_state['recs_debug'] = {}
                 st.rerun()
 
 
