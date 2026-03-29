@@ -789,80 +789,82 @@ def process_documents():
 
 def generate_recommended_questions(coordinator) -> list:
     """
-    Generate 6 research questions from actual uploaded paper content.
-    Uses FAISS to extract real text, then Gemini to generate specific questions.
+    Generate 6 specific research questions from actual uploaded paper content.
+    Uses FAISS to get real text, then the existing working LLM to generate questions.
+    No hardcoded model names - uses whatever model is already configured and working.
     """
     import json as _json
-    from google import genai as _genai
 
-    # ── Step 1: Extract real content from FAISS ───────────────────────────
+    # ── Step 1: Extract real content from FAISS ──────────────────────────────
     try:
-        dp = coordinator.document_processor
+        dp    = coordinator.document_processor
         stats = dp.get_processing_stats()
         if not stats.get('vector_store_initialized', False):
-            print('[RECS] Vector store not initialized - documents not processed yet')
+            print('[RECS] Vector store not ready')
             return []
 
         results = dp.search_documents(
             "introduction abstract methodology results findings conclusion", k=8
         )
         if not results:
-            print("[RECS] FAISS returned no results")
+            print('[RECS] FAISS returned no results')
             return []
 
         snippets, total = [], 0
         for r in results:
-            chunk = r.get("content", "").strip()
-            if chunk and total < 3000:
-                snippets.append(chunk[:500])
-                total += len(chunk[:500])
+            chunk = r.get('content', '').strip()
+            if chunk and total < 2500:
+                snippets.append(chunk[:400])
+                total += len(chunk[:400])
 
-        paper_text = "\n\n---\n\n".join(snippets)
+        paper_text = '\n\n'.join(snippets)
         if len(paper_text) < 50:
-            print("[RECS] Extracted text too short")
+            print('[RECS] Text too short')
             return []
 
-        print(f"[RECS] Extracted {len(paper_text)} chars from {len(snippets)} chunks")
+        print(f'[RECS] Got {len(paper_text)} chars from {len(snippets)} FAISS chunks')
 
     except Exception as e:
-        print(f"[RECS] FAISS extraction error: {e}")
+        print(f'[RECS] FAISS error: {e}')
         return []
 
-    # ── Step 2: Call Gemini directly (plain text, no JSON mode) ──────────
+    # ── Step 2: Use the existing working LLM (no hardcoded model) ────────────
     try:
-        api_key = coordinator.llm.api_key
-        client  = _genai.Client(api_key=api_key)
-
         prompt = (
-            "You are an expert research assistant.\n"
-            "Read the following excerpts from a research paper and generate exactly 6 "
-            "insightful questions a researcher would want to ask about this specific paper.\n\n"
-            "Rules:\n"
-            "- Questions MUST be specific to the content below, not generic\n"
-            "- Cover: main findings, methodology, key contributions, limitations, "
-            "comparisons, and future directions\n"
-            "- Each question must be under 15 words\n"
-            "- Return ONLY a JSON array of 6 strings, nothing else\n\n"
-            f"Paper excerpts:\n{paper_text}\n\n"
-            'Output format: ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?", "Q6?"]'
+            "You are a research assistant. Read these research paper excerpts carefully.\n"
+            "Generate exactly 6 specific, insightful questions a researcher would ask about THIS paper.\n\n"
+            "Requirements:\n"
+            "- Each question must be SPECIFIC to the content below (not generic)\n"
+            "- Cover: main findings, methodology, contributions, limitations, comparisons, future work\n"
+            "- Keep each question under 15 words\n"
+            "- Respond with ONLY a JSON array of 6 question strings\n\n"
+            f"Paper content:\n{paper_text}\n\n"
+            'Respond with ONLY this format (no explanation): ["Q1?", "Q2?", "Q3?", "Q4?", "Q5?", "Q6?"]'
         )
 
-        from google.genai import types as _types
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt,
-            config=_types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=512,
-            )
-        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You generate specific research questions from paper content. "
+                    "Always respond with a valid JSON array of exactly 6 question strings. "
+                    "No markdown, no explanation, just the JSON array."
+                )
+            },
+            {"role": "user", "content": prompt}
+        ]
 
-        raw = response.text.strip()
-        print(f"[RECS] Raw LLM response: {raw[:200]}")
+        response = coordinator.llm.make_call(messages)
+        if not response:
+            print('[RECS] LLM returned no response')
+            return []
 
-        # Strip markdown fences if present
-        if "```" in raw:
-            raw = re.sub(r"```(?:json)?", "", raw).strip()
+        raw = response.content.strip()
+        print(f'[RECS] Raw LLM output: {raw[:300]}')
+
+        # Clean markdown fences
+        raw = re.sub(r'```(?:json)?\s*', '', raw).strip()
+        raw = re.sub(r'```', '', raw).strip()
 
         # Extract JSON array
         match = re.search(r'\[.*?\]', raw, re.DOTALL)
@@ -871,14 +873,18 @@ def generate_recommended_questions(coordinator) -> list:
 
         questions = _json.loads(raw)
         if isinstance(questions, list):
-            clean = [q.strip() for q in questions if isinstance(q, str) and q.strip()]
-            print(f"[RECS] Generated {len(clean)} questions successfully")
+            clean = [str(q).strip() for q in questions if str(q).strip()]
+            print(f'[RECS] Successfully generated {len(clean)} questions')
             return clean[:6]
 
+        print('[RECS] Parsed result is not a list')
         return []
 
+    except _json.JSONDecodeError as e:
+        print(f'[RECS] JSON parse error: {e} | raw was: {raw[:200]}')
+        return []
     except Exception as e:
-        print(f"[RECS] LLM generation error: {e}")
+        print(f'[RECS] LLM error: {e}')
         return []
 
 

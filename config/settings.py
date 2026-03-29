@@ -19,7 +19,7 @@ class SystemConfig:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your-gemini-api-key-here")
     # Fallback to OPENAI_API_KEY for backward compatibility if needed
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-openai-api-key-here")
-    DEFAULT_MODEL = "gemini-2.0-flash"  # Stable, widely-available model
+    DEFAULT_MODEL = "gemini-2.5-flash"  # Stable, widely-available model
     
     # Real token-based pricing (per 1M tokens) — sourced from Google AI pricing page
     COST_PER_TOKEN = {
