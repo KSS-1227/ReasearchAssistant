@@ -1,11 +1,9 @@
-```
 """
 Literature Scanner Agent - Research Assistant System
 
 Agent 1: Searches and ranks papers using deterministic vector similarity.
 NO LLM calls - pure algorithmic approach for cost efficiency.
 """
-```
 
 import re
 import math
