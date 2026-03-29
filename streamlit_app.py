@@ -843,7 +843,7 @@ def generate_recommended_questions(coordinator) -> list:
             }
         ]
 
-        resp = coordinator.llm.make_call(messages, json_mode=False, max_tokens=1024)
+        resp = coordinator.llm.make_call(messages, json_mode=False, max_tokens=2048)
         dbg['3_llm_resp'] = str(resp.content[:200]) if resp else 'None'
 
         if not resp:
