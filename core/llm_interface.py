@@ -109,6 +109,7 @@ class LLMInterface:
         response_format: Optional[Dict] = None,  # kept for interface compatibility
         model: str = None,
         json_mode: bool = True,
+        max_tokens: Optional[int] = None,  # New parameter
     ) -> Optional[GeminiResponse]:
         """
         Make a single LLM call with automatic retry on transient errors.
@@ -147,7 +148,7 @@ class LLMInterface:
         config = genai_types.GenerateContentConfig(
             system_instruction="\n\n".join(system_parts) if system_parts else None,
             temperature=0.2,
-            max_output_tokens=SystemConfig.SYNTHESIS_CONFIG["max_tokens"],
+            max_output_tokens=max_tokens or SystemConfig.SYNTHESIS_CONFIG["max_tokens"],
             response_mime_type="application/json" if json_mode else "text/plain",
         )
 

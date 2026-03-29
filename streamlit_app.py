@@ -843,7 +843,7 @@ def generate_recommended_questions(coordinator) -> list:
             }
         ]
 
-        resp = coordinator.llm.make_call(messages, json_mode=False)
+        resp = coordinator.llm.make_call(messages, json_mode=False, max_tokens=1024)
         dbg['3_llm_resp'] = str(resp.content[:200]) if resp else 'None'
 
         if not resp:
@@ -2187,10 +2187,3 @@ def main():
 if __name__ == "__main__":
 
     main()
-
-
-
-
-
-
-
