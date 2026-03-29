@@ -783,39 +783,77 @@ def process_documents():
 
 
 def generate_recommended_questions(coordinator) -> list:
-    """Generate smart question recommendations from uploaded documents (0 LLM calls)."""
-    seed_topics = [
-        "main findings", "methodology", "key contributions",
-        "limitations", "future work", "experimental results",
-        "proposed approach", "comparison with existing methods",
-        "dataset used", "performance metrics"
-    ]
-    questions_map = {
-        "main findings":                    "What are the main findings of this research?",
-        "methodology":                      "What methodology or approach is used in this paper?",
-        "key contributions":                "What are the key contributions of this work?",
-        "limitations":                      "What are the limitations discussed in this research?",
-        "future work":                      "What future work directions are suggested?",
-        "experimental results":             "What do the experimental results show?",
-        "proposed approach":                "How does the proposed approach work?",
-        "comparison with existing methods": "How does this work compare to existing methods?",
-        "dataset used":                     "What datasets were used in this research?",
-        "performance metrics":              "What performance metrics were reported?"
-    }
-    recommended = []
+    """
+    Generate research questions directly from uploaded paper content using LLM.
+    Extracts real text from FAISS, sends to Gemini, returns 6 specific questions.
+    """
+    import json
+
+    # Step 1: Pull representative content from the vector store
     try:
         dp = coordinator.document_processor
-        for topic in seed_topics:
-            results = dp.search_documents(topic, k=1)
-            if results:
-                recommended.append(questions_map[topic])
-            if len(recommended) >= 6:
-                break
-    except Exception:
-        pass
-    if len(recommended) < 4:
-        recommended = list(questions_map.values())[:6]
-    return recommended[:6]
+        broad_results = dp.search_documents("research methodology findings results conclusion", k=6)
+        if not broad_results:
+            return []
+
+        # Collect up to ~2000 chars of real paper content
+        snippets = []
+        total_chars = 0
+        for r in broad_results:
+            chunk = r.get("content", "").strip()
+            if chunk and total_chars < 2000:
+                snippets.append(chunk[:400])
+                total_chars += len(chunk[:400])
+
+        combined_text = "\n\n".join(snippets)
+        if not combined_text:
+            return []
+    except Exception as e:
+        print(f"FAISS extraction failed: {e}")
+        return []
+
+    # Step 2: Ask LLM to generate questions from the actual content
+    prompt = f"""You are a research assistant. Based on the following excerpts from a research paper, 
+generate exactly 6 specific, insightful research questions that a researcher would want to ask about this paper.
+
+The questions must be:
+- Specific to the content below (not generic)
+- Varied: cover findings, methodology, comparisons, limitations, applications
+- Concise (under 15 words each)
+- Directly answerable from the paper
+
+Paper content:
+{combined_text}
+
+Respond ONLY with a valid JSON array of 6 strings. Example format:
+["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?"]"""
+
+    try:
+        messages = [
+            {"role": "system", "content": "You generate research questions from paper content. Always respond with a valid JSON array of strings only."},
+            {"role": "user",   "content": prompt}
+        ]
+        response = coordinator.llm.make_call(messages)
+        if not response:
+            return []
+
+        raw = response.content.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        questions = json.loads(raw)
+        if isinstance(questions, list):
+            return [q for q in questions if isinstance(q, str) and q.strip()][:6]
+        return []
+
+    except Exception as e:
+        print(f"LLM question generation failed: {e}")
+        return []
+
 
 def render_question_section():
 
