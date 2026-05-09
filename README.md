@@ -2,6 +2,8 @@
 
 > A hybrid multi-agent RAG system that processes academic documents and generates research synthesis using **exactly 1 LLM call per query**.
 
+🌐 **Live Demo:** [reasearchassistant.streamlit.app](https://reasearchassistant.streamlit.app/)
+
 ---
 
 ## How It Works
