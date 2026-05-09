@@ -257,30 +257,24 @@ def render_header():
 
     st.markdown('<div class="sub-header"><em>Hybrid Multi-Agent Research System</em></div>', unsafe_allow_html=True)
 
-    
-
     # Show current step
-
-    steps = ["📄 Upload Documents", "🔧 Process Documents", "❓ Ask Research Questions"]
-
+    steps = [
+        {"label": "Upload", "icon": "📄"},
+        {"label": "Process", "icon": "🔧"},
+        {"label": "Ask", "icon": "❓"}
+    ]
     current_step_idx = {"upload": 0, "process": 1, "question": 2}[st.session_state.current_step]
 
-    
-
-    cols = st.columns(3)
-
-    for i, (col, step) in enumerate(zip(cols, steps)):
-
-        if i <= current_step_idx:
-
-            col.success(step)
-
-        else:
-
-            col.info(step)
-
-    
-
+    step_html = '<div class="stepper">'
+    for i, step in enumerate(steps):
+        status = "active" if i == current_step_idx else "completed" if i < current_step_idx else ""
+        marker = "✓" if i < current_step_idx else str(i + 1)
+        step_html += f'<div class="step {status}">'
+        step_html += f'<div class="step-marker">{marker}</div>'
+        step_html += f'<div><strong>{step["icon"]} {step["label"]}</strong></div>'
+        step_html += '</div>'
+    step_html += '</div>'
+    st.markdown(step_html, unsafe_allow_html=True)
     st.divider()
 
 
@@ -289,323 +283,148 @@ def render_sidebar():
 
     """Render sidebar with system information and controls"""
 
-    
-
     with st.sidebar:
-
-        st.header("🏗️ System Architecture")
-
-        
-
-        # System status
+        st.markdown('<div class="sidebar-title">🏗️ System Architecture</div>', unsafe_allow_html=True)
 
         if st.session_state.api_key_valid:
-
-            st.success("✅ System Ready (Gemini API)")
-
+            st.markdown('<div class="status-pill"><span class="pulse-dot green"></span>✅ System Ready (Gemini API)</div>', unsafe_allow_html=True)
         else:
-
-            st.error("❌ API Key Required")
-
+            st.markdown('<div class="status-pill"><span class="pulse-dot yellow"></span>❌ API Key Required</div>', unsafe_allow_html=True)
             st.markdown("""
-
-            **Setup Instructions:**
-
-            1. Get Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
-
-            2. Create `.env` file with: `GEMINI_API_KEY=your-key-here`
-
-            3. Restart the app
-
-            """)
-
+            <div class="sidebar-card">
+                <strong>Setup Instructions:</strong>
+                <ol style='padding-left:18px; margin:10px 0 0 0; color:#cbd5e1;'>
+                    <li>Get Gemini API key from <a href='https://aistudio.google.com/app/apikey' target='_blank' style='color:#7c3aed;'>Google AI Studio</a></li>
+                    <li>Create a <code>.env</code> file with <code>GEMINI_API_KEY=your-key-here</code></li>
+                    <li>Restart the app</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
             return
 
-        
-
-        # Agent status display
-
-        st.markdown("### 🤖 3-Agent System Status")
-
-        
-
-        # Document Processor (0 LLM calls)
-
-        st.markdown("""
-
-        <div class="agent-status agent-deterministic">
-
-            📄 Document Processor: Deterministic (0 LLM calls)
-
-        </div>
-
-        """, unsafe_allow_html=True)
-
-        
-
-        # Literature Scanner (0 LLM calls)
-
-        st.markdown("""
-
-        <div class="agent-status agent-deterministic">
-
-            🔍 Literature Scanner: Deterministic (0 LLM calls)
-
-        </div>
-
-        """, unsafe_allow_html=True)
-
-        
-
-        # Citation Extractor (0 LLM calls)
-
-        st.markdown("""
-
-        <div class="agent-status agent-deterministic">
-
-            📑 Citation Extractor: Deterministic (0 LLM calls)
-
-        </div>
-
-        """, unsafe_allow_html=True)
-
-        
-
-        # Synthesis Agent (1 LLM call)
-
-        st.markdown("""
-
-        <div class="agent-status agent-llm">
-
-            🤖 Synthesis Agent: LLM-based (1 LLM call)
-
-        </div>
-
-        """, unsafe_allow_html=True)
-
-        
-
-        st.info("🎯 **Total: 1 LLM call per research question**")
-
-        
-
-        # Performance metrics
+        st.markdown(
+            '<div class="sidebar-card">'
+            '<strong>🤖 Agent Status</strong>'
+            '<div style="margin-top:14px; display:grid; gap:10px;">'
+            '<div class="status-pill"><span class="pulse-dot green"></span>📄 Document Processor — Deterministic</div>'
+            '<div class="status-pill"><span class="pulse-dot green"></span>🔍 Literature Scanner — Deterministic</div>'
+            '<div class="status-pill"><span class="pulse-dot green"></span>📑 Citation Extractor — Deterministic</div>'
+            '<div class="status-pill"><span class="pulse-dot yellow"></span>🤖 Synthesis Agent — LLM based</div>'
+            '</div>'
+            '</div>', unsafe_allow_html=True
+        )
 
         if st.session_state.research_system:
-
             stats = st.session_state.research_system.get_system_stats()
-
-            
-
-            st.markdown("### 📊 Performance Metrics")
-
-            
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                st.metric("Total LLM Calls", stats["total_llm_calls"])
-
-                st.metric("Sessions", stats["total_research_sessions"])
-
-            
-
-            with col2:
-
-                st.metric("Total Cost", f"${stats['total_cost']:.4f}")
-
-                st.metric("Efficiency", stats["efficiency_score"])
-
-            
-
-            # LLM call efficiency
+            st.markdown(
+                '<div class="sidebar-card">'
+                '<strong>📊 Performance Metrics</strong>'
+                '<div style="display:grid; gap:12px; margin-top:14px;">'
+                f'<div class="metric-card"><h3>Total LLM Calls</h3><h2>{stats["total_llm_calls"]}</h2></div>'
+                f'<div class="metric-card"><h3>Sessions</h3><h2>{stats["total_research_sessions"]}</h2></div>'
+                f'<div class="metric-card"><h3>Total Cost</h3><h2>${stats["total_cost"]:.4f}</h2></div>'
+                f'<div class="metric-card"><h3>Efficiency</h3><h2>{stats["efficiency_score"]}</h2></div>'
+                '</div>'
+                '</div>', unsafe_allow_html=True
+            )
 
             if stats["total_research_sessions"] > 0:
-
                 avg_calls = stats["average_llm_calls_per_session"]
+                efficiency_state = '🏆 Excellent' if avg_calls <= 1.5 else '✅ Target Met' if avg_calls <= 2.0 else '❌ Needs Improvement'
+                st.markdown(
+                    f'<div class="sidebar-card"><strong>🎯 LLM Call Efficiency</strong><p style="margin:12px 0 0; color:#cbd5e1;">{efficiency_state}: {avg_calls:.1f} calls/query</p></div>',
+                    unsafe_allow_html=True
+                )
 
-                st.markdown("### 🎯 LLM Call Efficiency")
-
-                
-
-                if avg_calls <= 1.5:
-
-                    st.success(f"🏆 Excellent: {avg_calls:.1f} calls/query")
-
-                elif avg_calls <= 2.0:
-
-                    st.success(f"✅ Target Met: {avg_calls:.1f} calls/query")
-
-                else:
-
-                    st.error(f"❌ Target Missed: {avg_calls:.1f} calls/query")
-
-        
-
-        # Document Management
-
-        st.markdown("### 📚 Document Status")
-
-        
-
+        st.markdown('<div class="sidebar-card"><strong>📚 Document Status</strong></div>', unsafe_allow_html=True)
         if st.session_state.documents_processed and st.session_state.research_system:
-
             processor = st.session_state.research_system.document_processor
-
             if processor:
-
                 stats = processor.get_processing_stats()
-
-                
-
                 if stats['vector_store_initialized']:
-
-                    st.success("✅ FAISS Vector Store Active")
-
-                    st.info(f"📄 {stats['total_documents']} documents")
-
-                    st.info(f"🔧 {stats['total_chunks']} chunks")
-
-                    st.info(f"🤖 {stats['llm_calls_made']} LLM calls")
-
+                    st.markdown(f'<div class="sidebar-card">✅ FAISS Vector Store Active<br>📄 {stats["total_documents"]} documents<br>🔧 {stats["total_chunks"]} chunks<br>🤖 {stats["llm_calls_made"]} LLM calls</div>', unsafe_allow_html=True)
                 else:
+                    st.markdown('<div class="sidebar-card">📚 No documents processed yet</div>', unsafe_allow_html=True)
 
-                    st.info("📚 No documents processed yet")
-
-        
-
-        # System controls
-
-        st.markdown("### ⚙️ System Controls")
-
-        
-
+        st.markdown('<div class="sidebar-card"><strong>⚙️ System Controls</strong></div>', unsafe_allow_html=True)
         if st.button("🔄 Reset System", help="Clear all data and reset system"):
-
             if st.session_state.research_system:
-
                 st.session_state.research_system.reset_system()
-
                 st.session_state.current_step = "upload"
-
                 st.session_state.uploaded_files = []
-
                 st.session_state.documents_processed = False
                 st.session_state.recommended_questions = []
                 st.session_state.recs_generated = False
                 st.session_state.selected_recommendation = ''
-
                 st.session_state.research_questions = []
-
                 st.session_state.processing_stats = {
-
                     'total_documents': 0,
-
                     'total_chunks': 0,
-
                     'llm_calls_made': 0
-
                 }
-
                 st.success("System reset complete!")
-
                 st.rerun()
 
+
+
+
         
+
 
 def render_upload_section():
 
     """Step 1: Document Upload"""
 
-    
-
-    # Check if adding another document
-
     is_additional = st.session_state.get('analyze_additional', False)
 
-    
-
     if is_additional:
-
         st.header("📄 Add Another Research Document")
-
         st.markdown("Upload an additional PDF, TXT, or MD file to analyze alongside your existing documents.")
-
         st.info("ℹ️ This document will be added to your knowledge base for comprehensive analysis.")
-
     else:
-
         st.header("📄 Step 1: Upload Research Documents")
-
         st.markdown("Upload PDF, TXT, or MD files to build your research knowledge base.")
 
-    
-
-    # File uploader
+    st.markdown(
+        '''
+        <div class="file-drop-zone">
+            <div class="drop-icon">⬇️</div>
+            <div class="drop-title">Drop your research papers here</div>
+            <div class="drop-note">PDF, TXT, and MD files are supported. Your documents will be converted into searchable knowledge instantly.</div>
+        </div>
+        ''', unsafe_allow_html=True)
 
     uploaded_files = st.file_uploader(
-
         "Choose research documents",
-
         type=['pdf', 'txt', 'md'],
-
         accept_multiple_files=True,
-
         help="Supported formats: PDF, TXT, MD. Documents will be processed and added to FAISS vector store."
-
     )
 
-    
-
     if uploaded_files:
-
         st.session_state.uploaded_files = uploaded_files
-
-        st.success(f"📚 {len(uploaded_files)} file(s) selected")
-
-        
-
-        # Show file details
-
-        st.markdown("**Selected Files:**")
-
+        badge_html = '<div class="file-badges">'
         for file in uploaded_files:
-
-            st.info(f"📄 {file.name} ({file.size / 1024:.1f} KB)")
-
-        
-
-        # Proceed to processing
+            badge_html += (
+                f'<div class="file-badge">📄 {file.name} <span style="opacity:.75;">({file.size / 1024:.1f} KB)</span>'
+                '<span class="remove">✕</span></div>'
+            )
+        badge_html += '</div>'
+        st.markdown(badge_html, unsafe_allow_html=True)
 
         if st.button("🚀 Proceed to Document Processing", type="primary", use_container_width=True):
-
             st.session_state.current_step = "process"
-
             st.rerun()
 
-    
-
-    # Show example documents
-
     with st.expander("📖 Example Research Documents"):
-
-            st.markdown("""
-
+        st.markdown("""
         **For testing, you can use:**
-
         - Research papers (PDF)
-
         - Technical documentation (TXT)
-
         - Academic articles (PDF)
-
         - Literature reviews (MD)
 
-        
-
         **Note:** The system will automatically chunk documents and create embeddings for semantic search.
-
         """)
 
 
@@ -614,90 +433,43 @@ def render_processing_section():
 
     """Step 2: Document Processing"""
 
-    
-
     st.header("🔧 Step 2: Process Documents")
-
     st.markdown("Documents are being processed and added to the FAISS vector store for semantic search.")
 
-    
-
     if not st.session_state.uploaded_files:
-
         st.error("❌ No files uploaded. Please go back to Step 1.")
-
         if st.button("⬅️ Back to Upload"):
-
             st.session_state.current_step = "upload"
-
             st.rerun()
-
         return
 
-    
-
-    # Show files to be processed
-
-    st.markdown("**Files to Process:**")
-
+    st.markdown('<div class="sidebar-card"><strong>Files to Process</strong></div>', unsafe_allow_html=True)
     for file in st.session_state.uploaded_files:
-
-        st.info(f"📄 {file.name} ({file.size / 1024:.1f} KB)")
-
-    
-
-    # Process documents button
+        st.markdown(
+            f'<div class="question-card">📄 <strong>{file.name}</strong> <span style="opacity:.72; font-size:.92rem;">({file.size / 1024:.1f} KB)</span></div>',
+            unsafe_allow_html=True
+        )
 
     if not st.session_state.documents_processed:
-
         if st.button("🔧 Process Documents", type="primary", use_container_width=True):
-
             process_documents()
 
-    
-
-    # Show processing status
-
     if st.session_state.documents_processed:
-
         st.success("✅ Documents processed successfully!")
-
-        
-
-        # Show processing stats
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-
-            st.metric("Documents", st.session_state.processing_stats['total_documents'])
-
-        with col2:
-
-            st.metric("Chunks", st.session_state.processing_stats['total_chunks'])
-
-        with col3:
-
-            st.metric("LLM Calls", st.session_state.processing_stats['llm_calls_made'])
-
-        
-
-        # Proceed to questions
+        st.markdown(
+            '<div class="metric-grid">'
+            f'<div class="metric-card"><h3>Documents</h3><h2>{st.session_state.processing_stats["total_documents"]}</h2></div>'
+            f'<div class="metric-card"><h3>Chunks</h3><h2>{st.session_state.processing_stats["total_chunks"]}</h2></div>'
+            f'<div class="metric-card"><h3>LLM Calls</h3><h2>{st.session_state.processing_stats["llm_calls_made"]}</h2></div>'
+            '</div>', unsafe_allow_html=True
+        )
 
         if st.button("❓ Proceed to Research Questions", type="primary", use_container_width=True):
-
             st.session_state.current_step = "question"
-
             st.rerun()
 
-    
-
-    # Back button
-
     if st.button("⬅️ Back to Upload"):
-
         st.session_state.current_step = "upload"
-
         st.rerun()
 
 
