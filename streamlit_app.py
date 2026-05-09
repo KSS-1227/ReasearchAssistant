@@ -22,6 +22,8 @@ import time
 
 import os
 
+import traceback
+
 from datetime import datetime
 
 from typing import Dict, Any, List, Optional
@@ -66,103 +68,551 @@ def load_custom_css():
 
     <style>
 
-    .main-header {
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
-        font-size: 2.5rem;
 
-        font-weight: bold;
+    :root {
 
-        text-align: center;
+        color-scheme: dark;
 
-        margin-bottom: 1rem;
+        font-family: 'Inter', sans-serif;
 
-        background: linear-gradient(90deg, #1f77b4 0%, #ff7f0e 100%);
+        background: #0a0f1e;
 
-        -webkit-background-clip: text;
-
-        -webkit-text-fill-color: transparent;
+        color: #f8fafc;
 
     }
 
-    
+
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"] {
+
+        background: #0a0f1e !important;
+
+        color: #f8fafc !important;
+
+    }
+
+
+    .block-container {
+
+        padding: 32px 28px 24px !important;
+
+        max-width: 900px;
+
+        margin: 0 auto;
+
+    }
+
+
+    .main-header {
+
+        color: #f8fafc;
+
+        font-size: clamp(2.4rem, 2.6vw, 3.4rem);
+
+        font-weight: 700;
+
+        letter-spacing: -0.04em;
+
+        margin-bottom: 0.15rem;
+
+    }
+
 
     .sub-header {
 
+        color: #cbd5e1;
+
+        font-size: 1rem;
+
+        margin-bottom: 1.75rem;
+
+    }
+
+
+    .stepper {
+
+        display: grid;
+
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+
+        gap: 12px;
+
+        margin: 16px 0 28px;
+
+    }
+
+
+    .step {
+
+        display: flex;
+
+        align-items: center;
+
+        gap: 12px;
+
+        padding: 16px 18px;
+
+        border-radius: 999px;
+
+        border: 1px solid rgba(255,255,255,0.08);
+
+        background: #111f38;
+
+        color: #b8c4dd;
+
+        transition: all 0.25s ease;
+
+    }
+
+
+    .step.active {
+
+        background: linear-gradient(135deg, #4f8ef7, #7c3aed);
+
+        color: #ffffff;
+
+        border-color: rgba(79,142,247,0.4);
+
+        box-shadow: 0 0 24px rgba(79,142,247,0.18);
+
+    }
+
+
+    .step.completed {
+
+        background: #12203a;
+
+        color: #f8fafc;
+
+    }
+
+
+    .step-marker {
+
+        width: 30px;
+
+        height: 30px;
+
+        border-radius: 50%;
+
+        display: grid;
+
+        place-items: center;
+
+        background: rgba(79,142,247,0.16);
+
+        color: #4f8ef7;
+
+        font-weight: 700;
+
+    }
+
+
+    .sidebar-title {
+
+        font-size: 1.05rem;
+
+        font-weight: 700;
+
+        color: #f8fafc;
+
+        margin-bottom: 1rem;
+
+    }
+
+
+    .sidebar-card,
+
+    .metric-card,
+
+    .step-card,
+
+    .file-drop-zone,
+
+    .question-card,
+
+    .result-card {
+
+        background: #1e2a3a;
+
+        border: 1px solid rgba(255,255,255,0.08);
+
+        border-radius: 16px;
+
+        box-shadow: 0 0 24px rgba(79,142,247,0.12);
+
+    }
+
+
+    .sidebar-card,
+
+    .metric-card,
+
+    .step-card,
+
+    .result-card {
+
+        padding: 18px 20px;
+
+        color: #f8fafc;
+
+    }
+
+
+    .status-pill {
+
+        display: inline-flex;
+
+        align-items: center;
+
+        gap: 10px;
+
+        padding: 12px 14px;
+
+        border-radius: 14px;
+
+        font-weight: 600;
+
+        margin-bottom: 12px;
+
+        background: rgba(255,255,255,0.03);
+
+        border: 1px solid rgba(255,255,255,0.08);
+
+    }
+
+
+    .pulse-dot {
+
+        width: 10px;
+
+        height: 10px;
+
+        border-radius: 50%;
+
+        animation: pulse 1.8s infinite ease-in-out;
+
+        box-shadow: 0 0 0 rgba(79,142,247,0.25);
+
+    }
+
+
+    .pulse-dot.green { background: #4ade80; }
+
+    .pulse-dot.yellow { background: #facc15; }
+
+
+    @keyframes pulse {
+
+        0%, 100% { transform: scale(1); opacity: 0.92; }
+
+        50% { transform: scale(1.4); opacity: 0.4; }
+
+    }
+
+
+    .file-drop-zone {
+
+        padding: 42px 32px;
+
+        border: 2px dashed rgba(79,142,247,0.35);
+
+        border-radius: 20px;
+
         text-align: center;
 
-        color: #666;
+        margin-bottom: 1.5rem;
 
-        margin-bottom: 2rem;
+        background: linear-gradient(180deg, rgba(79,142,247,0.06), rgba(124,58,237,0.04));
 
-    }
-
-    
-
-    .step-card {
-
-        border: 2px solid #e0e0e0;
-
-        border-radius: 15px;
-
-        padding: 1.5rem;
-
-        margin: 1rem 0;
-
-        background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
-
-        color: white;
-
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: all 0.25s ease;
 
     }
 
-    
 
-    .metric-card {
+    .file-drop-zone:hover {
 
-        background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+        box-shadow: 0 0 28px rgba(79,142,247,0.14);
 
-        color: white;
-
-        padding: 1.5rem;
-
-        border-radius: 15px;
-
-        margin: 0.5rem;
-
-        text-align: center;
-
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        border-color: #4f8ef7;
 
     }
 
-    
 
-    .agent-status {
+    .drop-icon {
 
-        padding: 0.5rem;
+        font-size: 2.4rem;
 
-        border-radius: 8px;
+        color: #4f8ef7;
 
-        margin: 0.25rem 0;
-
-        font-weight: bold;
+        margin-bottom: 0.65rem;
 
     }
 
-    
 
-    .agent-llm { background-color: #ffeb3b; color: #000; }
+    .drop-title {
 
-    .agent-deterministic { background-color: #4caf50; color: white; }
+        font-size: 1.14rem;
 
-    
+        font-weight: 600;
 
-    #MainMenu {visibility: hidden;}
+        color: #f8fafc;
 
-    footer {visibility: hidden;}
+    }
 
-    header {visibility: hidden;}
+
+    .drop-note {
+
+        color: #9fb4d1;
+
+        margin-top: 0.45rem;
+
+    }
+
+
+    .file-badges {
+
+        display: flex;
+
+        flex-wrap: wrap;
+
+        gap: 10px;
+
+        margin-top: 14px;
+
+    }
+
+
+    .file-badge {
+
+        display: inline-flex;
+
+        align-items: center;
+
+        gap: 8px;
+
+        padding: 11px 16px;
+
+        border-radius: 999px;
+
+        background: rgba(255,255,255,0.05);
+
+        border: 1px solid rgba(255,255,255,0.1);
+
+        color: #f8fafc;
+
+        font-size: 0.95rem;
+
+    }
+
+
+    .file-badge .remove {
+
+        display: inline-flex;
+
+        align-items: center;
+
+        justify-content: center;
+
+        width: 22px;
+
+        height: 22px;
+
+        border-radius: 999px;
+
+        background: rgba(255,255,255,0.08);
+
+        color: #f8fafc;
+
+        font-size: 0.85rem;
+
+    }
+
+
+    .metric-grid {
+
+        display: grid;
+
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+
+        gap: 14px;
+
+        margin: 20px 0;
+
+    }
+
+
+    .metric-card h3 {
+
+        margin: 0 0 8px;
+
+        font-size: 0.92rem;
+
+        font-weight: 600;
+
+        color: #9fb4d1;
+
+    }
+
+
+    .metric-card h2 {
+
+        margin: 0;
+
+        font-size: 2rem;
+
+        font-weight: 700;
+
+        color: #f8fafc;
+
+    }
+
+
+    .question-card-grid {
+
+        display: grid;
+
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+
+        gap: 14px;
+
+        margin: 18px 0 12px;
+
+    }
+
+
+    .question-card {
+
+        border-left: 4px solid #4f8ef7;
+
+        padding: 18px;
+
+        border-radius: 16px;
+
+        background: #111f38;
+
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+    }
+
+
+    .question-card:hover {
+
+        transform: translateY(-2px);
+
+        box-shadow: 0 20px 36px rgba(79,142,247,0.18);
+
+    }
+
+
+    .question-card span {
+
+        display: block;
+
+        color: #f8fafc;
+
+        font-weight: 600;
+
+    }
+
+
+    .stButton>button,
+
+    button {
+
+        background: linear-gradient(135deg, #4f8ef7, #7c3aed) !important;
+
+        color: #ffffff !important;
+
+        border: none !important;
+
+        min-height: 48px;
+
+        border-radius: 12px !important;
+
+        box-shadow: 0 18px 30px rgba(79,142,247,0.16);
+
+        font-weight: 700 !important;
+
+    }
+
+
+    .stTextArea>div>textarea,
+
+    .stTextInput>div>input,
+
+    textarea,
+
+    input,
+
+    select {
+
+        background: #111f38 !important;
+
+        color: #f8fafc !important;
+
+        border: 1px solid rgba(79,142,247,0.28) !important;
+
+        border-radius: 12px !important;
+
+    }
+
+
+    textarea:focus,
+
+    input:focus,
+
+    select:focus {
+
+        outline: 2px solid rgba(79,142,247,0.6) !important;
+
+        outline-offset: 2px !important;
+
+    }
+
+
+    .stTabs [role="tab"] {
+
+        border-radius: 999px !important;
+
+        background: #0d1a34 !important;
+
+        color: #cbd5e1 !important;
+
+        border: 1px solid rgba(255,255,255,0.08) !important;
+
+        padding: 10px 18px !important;
+
+        margin-right: 8px !important;
+
+        transition: all 0.2s ease !important;
+
+    }
+
+
+    .stTabs [role="tab"][aria-selected="true"] {
+
+        background: linear-gradient(135deg, #4f8ef7, #7c3aed) !important;
+
+        color: #ffffff !important;
+
+        border-color: rgba(79,142,247,0.4) !important;
+
+    }
+
+
+    .stTabs [role="tab"]:hover {
+
+        transform: translateY(-1px);
+
+    }
+
+
+    .result-card { margin-top: 20px; }
+
+
+    #MainMenu, footer, header { visibility: hidden !important; }
 
     </style>
 
@@ -567,7 +1017,6 @@ def generate_recommended_questions(coordinator) -> list:
     import json as _j
     import re as _re
     import streamlit as _st
-    import traceback
 
     _st.session_state['recs_debug'] = {}
     dbg = _st.session_state['recs_debug']
@@ -1082,19 +1531,19 @@ def process_research_question(question: str, max_results: int):
 
             # Create answer from synthesis
 
-            answer = "## Research Synthesis\n\n"
+            parts = ["## Research Synthesis\n\n"]
 
             
 
             # Key findings
 
-            answer += "### 🔍 Key Findings:\n"
+            parts.append("### 🔍 Key Findings:\n")
 
             for i, finding in enumerate(synthesis['key_findings'], 1):
 
-                answer += f"{i}. {finding}\n"
+                parts.append(f"{i}. {finding}\n")
 
-            answer += "\n"
+            parts.append("\n")
 
             
 
@@ -1102,13 +1551,13 @@ def process_research_question(question: str, max_results: int):
 
             if synthesis['methodology_insights']:
 
-                answer += "### 🔬 Methodology Insights:\n"
+                parts.append("### 🔬 Methodology Insights:\n")
 
                 for insight in synthesis['methodology_insights']:
 
-                    answer += f"• {insight}\n"
+                    parts.append(f"• {insight}\n")
 
-                answer += "\n"
+                parts.append("\n")
 
             
 
@@ -1116,13 +1565,13 @@ def process_research_question(question: str, max_results: int):
 
             if synthesis['research_gaps']:
 
-                answer += "### 🎯 Research Gaps Identified:\n"
+                parts.append("### 🎯 Research Gaps Identified:\n")
 
                 for gap in synthesis['research_gaps']:
 
-                    answer += f"• {gap}\n"
+                    parts.append(f"• {gap}\n")
 
-                answer += "\n"
+                parts.append("\n")
 
             
 
@@ -1130,19 +1579,21 @@ def process_research_question(question: str, max_results: int):
 
             if synthesis['recommended_papers']:
 
-                answer += "### 📖 Recommended Documents:\n"
+                parts.append("### 📖 Recommended Documents:\n")
 
                 for paper in synthesis['recommended_papers']:
 
-                    answer += f"• {paper}\n"
+                    parts.append(f"• {paper}\n")
 
-                answer += "\n"
+                parts.append("\n")
 
             
 
-            answer += f"**Confidence Score:** {synthesis['confidence']:.2f}/1.0\n"
+            parts.append(f"**Confidence Score:** {synthesis['confidence']:.2f}/1.0\n")
 
-            answer += f"**Analysis Quality:** {synthesis['completeness']['quality_rating']}\n"
+            parts.append(f"**Analysis Quality:** {synthesis['completeness']['quality_rating']}\n")
+
+            answer = "".join(parts)
 
             
 
@@ -1193,8 +1644,6 @@ def process_research_question(question: str, max_results: int):
             st.error(f"❌ Error processing question: {str(e)}")
 
             st.error("Please check if documents were processed correctly.")
-
-            import traceback
 
             st.error(f"Technical details: {traceback.format_exc()}")
 
@@ -1528,7 +1977,7 @@ def display_research_pipeline_results(qa_pair: Dict[str, Any], research_result: 
 
     
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["?? Literature Discovery", "?? Citation Analysis", "?? Key Quotes", "?? Research Gaps", "?? Limitations", "?? Performance Metrics"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📚 Literature Discovery", "📑 Citation Analysis", "💬 Key Quotes", "🎯 Research Gaps", "⚠️ Limitations", "📊 Performance Metrics"])
 
     
 
