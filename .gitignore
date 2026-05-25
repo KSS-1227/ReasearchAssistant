@@ -54,3 +54,9 @@ tabs_insert.txt
 faiss_index/
 *.faiss
 *.pkl
+
+# ============================================================
+# Pipeline logs (runtime output — not source code)
+# ============================================================
+logs/
+*.jsonl

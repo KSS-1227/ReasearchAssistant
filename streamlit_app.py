@@ -1013,7 +1013,16 @@ def process_documents():
 
 
 def generate_recommended_questions(coordinator) -> list:
-    """Generate 6 questions from paper content. Returns (questions_list, error_string)."""
+    """
+    Generate 6 suggested questions from uploaded document content.
+
+    NOTE ON LLM CALL ACCOUNTING:
+    This function makes 1 additional LLM call outside the main research
+    pipeline. It is a UI helper that runs once after document processing,
+    not during a research query. The main pipeline still uses exactly
+    1 LLM call per research query. This call is tracked separately via
+    coordinator.llm.call_count and visible in the sidebar metrics.
+    """
     import json as _j
     import re as _re
     import streamlit as _st
@@ -1858,80 +1867,34 @@ def display_research_pipeline_results(qa_pair: Dict[str, Any], research_result: 
     
 
     performance = research_result['performance_metrics']
-
     extracted_insights = research_result['extracted_insights']
-
     synthesis = research_result['research_synthesis']
+    retrieval_confidence = performance.get('retrieval_confidence', 0.0)
 
-    
+    # confidence colour: green ≥0.7, amber ≥0.4, red <0.4
+    conf_color = "#4ade80" if retrieval_confidence >= 0.7 else "#facc15" if retrieval_confidence >= 0.4 else "#f87171"
 
-    # Performance metrics
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    
+    # Performance metrics — 5 cards
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-
-        st.markdown(f"""
-
-        <div class="metric-card">
-
-            <h3>🤖 LLM Calls</h3>
-
-            <h2>{performance['total_llm_calls']}</h2>
-
-        </div>
-
-        """, unsafe_allow_html=True)
-
-    
-
+        st.markdown(f'<div class="metric-card"><h3>🤖 LLM Calls</h3><h2>{performance["total_llm_calls"]}</h2></div>', unsafe_allow_html=True)
     with col2:
-
-        st.markdown(f"""
-
-        <div class="metric-card">
-
-            <h3>📚 Documents</h3>
-
-            <h2>{performance['papers_analyzed']}</h2>
-
-            </div>
-
-        """, unsafe_allow_html=True)
-
-    
-
+        st.markdown(f'<div class="metric-card"><h3>📚 Documents</h3><h2>{performance["papers_analyzed"]}</h2></div>', unsafe_allow_html=True)
     with col3:
-
-        st.markdown(f"""
-
-        <div class="metric-card">
-
-            <h3>💬 Quotes</h3>
-
-            <h2>{extracted_insights['total_quotes']}</h2>
-
-        </div>
-
-        """, unsafe_allow_html=True)
-
-    
-
+        st.markdown(f'<div class="metric-card"><h3>💬 Quotes</h3><h2>{extracted_insights["total_quotes"]}</h2></div>', unsafe_allow_html=True)
     with col4:
-
-        st.markdown(f"""
-
-        <div class="metric-card">
-
-            <h3>⏱️ Time</h3>
-
-            <h2>{performance['processing_time']:.2f}s</h2>
-
-        </div>
-
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><h3>⏱️ Time</h3><h2>{performance["processing_time"]:.2f}s</h2></div>', unsafe_allow_html=True)
+    with col5:
+        st.markdown(
+            f'<div class="metric-card">'
+            f'<h3>🎯 Retrieval Confidence</h3>'
+            f'<h2 style="color:{conf_color}">{retrieval_confidence:.2f}</h2>'
+            f'<p style="margin:4px 0 0; font-size:0.78rem; color:#9fb4d1;">'
+            f'{"High" if retrieval_confidence >= 0.7 else "Medium" if retrieval_confidence >= 0.4 else "Low"}'
+            f'</p></div>',
+            unsafe_allow_html=True
+        )
 
     
 

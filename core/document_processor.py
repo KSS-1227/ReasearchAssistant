@@ -54,7 +54,9 @@ class DocumentProcessor:
         self.embeddings = GoogleEmbeddings(google_api_key)
         self.vector_store: Optional[FAISS] = None
         self.documents: List[Document] = []
-        self.llm_call_count = 0  # Manual tracking as required
+        # Tracks Google Embedding API calls (separate from LLM/synthesis calls)
+        self.embedding_call_count = 0
+        self.llm_call_count = self.embedding_call_count  # alias for backward compat
         
         # Document processing stats
         self.processing_stats = {
@@ -154,13 +156,12 @@ class DocumentProcessor:
             
             # Create or update vector store
             if self.vector_store is None:
-                # First document - create new vector store
                 self.vector_store = FAISS.from_documents(chunks, self.embeddings)
-                self.llm_call_count += len(chunks)  # Google embeddings generation counts as LLM calls
             else:
-                # Add to existing vector store
                 self.vector_store.add_documents(chunks)
-                self.llm_call_count += len(chunks)  # Google embeddings generation counts as LLM calls
+            # Count embedding API calls (NOT synthesis LLM calls)
+            self.embedding_call_count += len(chunks)
+            self.llm_call_count = self.embedding_call_count  # keep alias in sync
             
             # Update vector store size
             self.processing_stats['vector_store_size'] = len(self.vector_store.index_to_docstore_id)
@@ -307,27 +308,58 @@ class DocumentProcessor:
             # Validate and sanitize k parameter
             if not isinstance(k, int) or k <= 0:
                 k = 5
-            # Increase k to get more chunks from different pages, but cap at 100 for safety
-            results = self.vector_store.similarity_search_with_score(query, k=min(k * 3, 100))
-            
-            # Format results with complete metadata
+
+            # Fetch k*3 candidates to give re-ranker enough material,
+            # but enforce page diversity so early pages don't dominate.
+            fetch_k = min(k * 3, 100)
+            raw_results = self.vector_store.similarity_search_with_score(query, k=fetch_k)
+
+            # --- Page diversity filter ---
+            # Allow at most 2 chunks per page so the result set spans
+            # the whole document rather than clustering on page 1-3.
+            page_chunk_count: dict = {}
+            diverse_results = []
+            for doc, score in raw_results:
+                page = doc.metadata.get('page', 0)
+                if page_chunk_count.get(page, 0) < 2:
+                    diverse_results.append((doc, score))
+                    page_chunk_count[page] = page_chunk_count.get(page, 0) + 1
+
+            # If diversity filter removed too many, fall back to raw results
+            results = diverse_results if len(diverse_results) >= k else raw_results
+
+            logger.info(
+                "search_documents | fetch_k=%d raw=%d after_diversity=%d pages_covered=%d",
+                fetch_k, len(raw_results), len(results), len(page_chunk_count)
+            )
+
+            # Format results with complete metadata.
+            # IMPORTANT: FAISS similarity_search_with_score returns L2 distances
+            # (lower = more similar). We store the raw distance as 'faiss_distance'
+            # AND a converted similarity in [0,1] as 'similarity_score' so all
+            # downstream consumers (rerank_chunks, compute_confidence) work with
+            # a consistent similarity convention where higher = more relevant.
             formatted_results = []
             seen_pages = set()
-            
-            for doc, score in results:
-                page_num = doc.metadata.get('page', 'N/A')
-                heading = doc.metadata.get('heading', 'N/A')
-                
+
+            for doc, faiss_distance in results:
+                page_num   = doc.metadata.get('page', 'N/A')
+                heading    = doc.metadata.get('heading', 'N/A')
+                # Convert L2 distance to similarity: sim = 1 / (1 + distance)
+                # This maps [0, +inf) → (0, 1] without clamping
+                cosine_sim = 1.0 / (1.0 + float(faiss_distance))
+
                 formatted_results.append({
-                    'content': doc.page_content,
-                    'metadata': doc.metadata,
-                    'similarity_score': float(score),
-                    'source': doc.metadata.get('source', 'Unknown'),
-                    'page': page_num,
-                    'heading': heading,
-                    'source_file': doc.metadata.get('source_file', 'Unknown')
+                    'content':          doc.page_content,
+                    'metadata':         doc.metadata,
+                    'faiss_distance':   float(faiss_distance),   # raw L2 distance
+                    'similarity_score': cosine_sim,              # converted to [0,1]
+                    'source':           doc.metadata.get('source', 'Unknown'),
+                    'page':             page_num,
+                    'heading':          heading,
+                    'source_file':      doc.metadata.get('source_file', 'Unknown'),
                 })
-                
+
                 seen_pages.add(page_num)
             
             logger.info("Retrieved %d chunks from %d pages", len(formatted_results), len(seen_pages))
@@ -375,18 +407,20 @@ class DocumentProcessor:
         """Get current processing statistics."""
         return {
             **self.processing_stats,
-            'llm_calls_made': self.llm_call_count,
-            'vector_store_initialized': self.vector_store is not None
+            'embedding_calls_made': self.embedding_call_count,
+            'llm_calls_made':       self.embedding_call_count,  # backward compat alias
+            'vector_store_initialized': self.vector_store is not None,
         }
     
     def reset_processor(self):
         """Reset the document processor and clear all data."""
         self.vector_store = None
         self.documents = []
+        self.embedding_call_count = 0
         self.llm_call_count = 0
         self.processing_stats = {
             'total_documents': 0,
             'total_chunks': 0,
             'total_tokens_estimated': 0,
-            'vector_store_size': 0
+            'vector_store_size': 0,
         }
