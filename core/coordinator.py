@@ -16,6 +16,7 @@ Pipeline flow per query:
 import os
 import time
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -425,6 +426,38 @@ class ResearchCoordinator:
         synthesis = synthesis_result["synthesis"]
         meta      = extraction_result["metadata_analysis"]
 
+        # Augment key findings with their source page/section when the
+        # LLM included explicit [Paper N] citation labels. We leave
+        # findings untouched when no label is present.
+        citation_map = synthesis_result.get("citation_map", {})
+
+        def _attach_source_info(finding_text: str) -> Dict[str, Any]:
+            """Return a dict with finding text and inferred source info."""
+            m = re.search(r"\[Paper (\d+)\]", finding_text)
+            label = None
+            source = {"label": None, "title": None, "page": "N/A", "section": "N/A"}
+            if m:
+                try:
+                    idx = int(m.group(1)) - 1
+                    label = f"[Paper {m.group(1)}]"
+                    paper = papers[idx] if 0 <= idx < len(papers) else None
+                    if paper is not None:
+                        source["label"] = label
+                        source["title"] = getattr(paper, "title", None)
+                        # Prefer explicit page metadata if available
+                        pm = getattr(paper, "metadata", {}) or {}
+                        source["page"] = pm.get("page", pm.get("page_range", "N/A"))
+                        # Choose the first heading as the most relevant section
+                        headings = pm.get("headings") or pm.get("sections") or []
+                        source["section"] = headings[0] if headings else "N/A"
+                except Exception:
+                    # Be defensive — never raise while assembling response
+                    pass
+
+            # Clean finding text by removing the inline [Paper N] tag
+            cleaned = re.sub(r"\s*\[Paper \d+\]", "", finding_text).strip()
+            return {"text": cleaned, "source": source}
+
         return {
             "session_id": session_id,
             "success":    True,
@@ -451,16 +484,21 @@ class ResearchCoordinator:
                 "research_insights": extraction_result["research_insights"],
             },
 
-            # LLM synthesis with [Paper N] citation labels
+            # LLM synthesis with [Paper N] citation labels. Key findings are
+            # augmented with source page/section where available. Research gaps
+            # are placed last per user request.
             "research_synthesis": {
-                "key_findings":        synthesis.key_findings,
+                "key_findings":        [
+                    _attach_source_info(k) for k in getattr(synthesis, "key_findings", [])
+                ],
                 "methodology_insights": synthesis.methodology_insights,
-                "research_gaps":       synthesis.research_gaps,
                 "recommended_papers":  synthesis.recommended_papers,
                 "confidence":          synthesis.confidence_score,
                 "completeness":        synthesis_result["synthesis_completeness"],
                 "limitations":         getattr(synthesis, "limitations", []),
                 "performance_metrics": getattr(synthesis, "performance_metrics", []),
+                # research_gaps intentionally last
+                "research_gaps":       synthesis.research_gaps,
             },
 
             # Observability: LLM calls, cost, retrieval confidence score
@@ -574,7 +612,9 @@ class ResearchCoordinator:
             metrics.get("retrieval_confidence", 0),
         )
         for i, finding in enumerate(synthesis["key_findings"][:3], 1):
-            logger.info("  Finding %d: %.80s", i, finding)
+            # `finding` may be a dict {text, source} after augmentation
+            text = finding.get("text") if isinstance(finding, dict) else finding
+            logger.info("  Finding %d: %.80s", i, text)
         logger.info(
             "LLM calls=%d cost=$%.4f time=%.2fs efficiency=%s",
             metrics["total_llm_calls"],

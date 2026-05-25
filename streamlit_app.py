@@ -1544,14 +1544,18 @@ def process_research_question(question: str, max_results: int):
 
             
 
-            # Key findings
-
+            # Key findings — attach source info when available
             parts.append("### 🔍 Key Findings:\n")
-
             for i, finding in enumerate(synthesis['key_findings'], 1):
-
-                parts.append(f"{i}. {finding}\n")
-
+                if isinstance(finding, dict):
+                    text = finding.get('text', '')
+                    src = finding.get('source', {}) or {}
+                    title = src.get('title') or src.get('label') or 'Unknown'
+                    page = src.get('page', 'N/A')
+                    section = src.get('section', 'N/A')
+                    parts.append(f"{i}. {text}  _(Source: {title} — Page: {page}, Section: {section})_\n")
+                else:
+                    parts.append(f"{i}. {finding}\n")
             parts.append("\n")
 
             
@@ -1570,17 +1574,7 @@ def process_research_question(question: str, max_results: int):
 
             
 
-            # Research gaps
-
-            if synthesis['research_gaps']:
-
-                parts.append("### 🎯 Research Gaps Identified:\n")
-
-                for gap in synthesis['research_gaps']:
-
-                    parts.append(f"• {gap}\n")
-
-                parts.append("\n")
+            # Research gaps will be appended last (see below)
 
             
 
@@ -1601,6 +1595,13 @@ def process_research_question(question: str, max_results: int):
             parts.append(f"**Confidence Score:** {synthesis['confidence']:.2f}/1.0\n")
 
             parts.append(f"**Analysis Quality:** {synthesis['completeness']['quality_rating']}\n")
+
+            # Research gaps last (per user request)
+            if synthesis.get('research_gaps'):
+                parts.append("\n### 🎯 Research Gaps Identified:\n")
+                for gap in synthesis['research_gaps']:
+                    parts.append(f"• {gap}\n")
+                parts.append("\n")
 
             answer = "".join(parts)
 
@@ -1900,10 +1901,52 @@ def display_research_pipeline_results(qa_pair: Dict[str, Any], research_result: 
 
     st.divider()
 
-    
+    # --- Citation Legend with page + section source info ---
+    # Shows users exactly which document, pages, and sections each
+    # [Paper N] label refers to so every finding is fully traceable.
+    papers_list = research_result.get('papers_found', {}).get('papers', [])
+    if papers_list:
+        rows = ""
+        for i, p in enumerate(papers_list, 1):
+            title      = p.get('title', 'Unknown').replace('Document: ', '')
+            meta       = p.get('metadata', {}) or {}
+            page_range = meta.get('page_range', 'N/A')
+            headings   = meta.get('headings', [])
+            # Show up to 3 section headings so the row stays readable
+            sections   = ', '.join(str(h) for h in headings[:3]) if headings else 'N/A'
+            if len(headings) > 3:
+                sections += f' +{len(headings)-3} more'
+
+            rows += (
+                f'<tr style="border-bottom:1px solid rgba(255,255,255,0.06);">'
+                f'<td style="padding:8px 14px 8px 0; color:#4f8ef7; font-weight:700; '
+                f'white-space:nowrap; vertical-align:top;">[Paper {i}]</td>'
+                f'<td style="padding:8px 14px 8px 0; color:#f8fafc; vertical-align:top;">'
+                f'<strong>{title}</strong></td>'
+                f'<td style="padding:8px 14px 8px 0; color:#9fb4d1; white-space:nowrap; '
+                f'vertical-align:top;">📄 Pages {page_range}</td>'
+                f'<td style="padding:8px 0; color:#9fb4d1; vertical-align:top;">'
+                f'📑 {sections}</td>'
+                f'</tr>'
+            )
+
+        st.markdown(
+            f'<div class="result-card" style="margin-bottom:20px;">'
+            f'<p style="margin:0 0 12px; font-weight:700; color:#9fb4d1; font-size:0.88rem;">'
+            f'📎 SOURCE INDEX — every [Paper N] citation traces back to these documents</p>'
+            f'<table style="border-collapse:collapse; width:100%; font-size:0.9rem;">'
+            f'<thead><tr style="border-bottom:1px solid rgba(79,142,247,0.3);">'
+            f'<th style="padding:4px 14px 8px 0; color:#4f8ef7; text-align:left;">Label</th>'
+            f'<th style="padding:4px 14px 8px 0; color:#4f8ef7; text-align:left;">Document</th>'
+            f'<th style="padding:4px 14px 8px 0; color:#4f8ef7; text-align:left;">Pages</th>'
+            f'<th style="padding:4px 0 8px 0; color:#4f8ef7; text-align:left;">Sections</th>'
+            f'</tr></thead>'
+            f'<tbody>{rows}</tbody>'
+            f'</table></div>',
+            unsafe_allow_html=True
+        )
 
     # Display the answer - Full response
-
     st.subheader("💡 Research Synthesis")
 
     
