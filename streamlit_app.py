@@ -622,9 +622,9 @@ def load_custom_css():
 def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to speak"):
     placeholder_json = json.dumps(placeholder)
     status_text_json = json.dumps(status_text)
-    html = """
+    html = f"""
     <style>
-    .voice-input-button {
+    .voice-input-button {{
         position: absolute;
         right: 14px;
         top: 14px;
@@ -640,16 +640,16 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         box-shadow: 0 14px 28px rgba(0,0,0,0.2);
         z-index: 20;
         transition: transform 0.18s ease, box-shadow 0.18s ease;
-    }
-    .voice-input-button:hover {
+    }}
+    .voice-input-button:hover {{
         transform: translateY(-1px);
         box-shadow: 0 16px 32px rgba(0,0,0,0.24);
-    }
-    .voice-input-button.recording {
+    }}
+    .voice-input-button.recording {{
         background: #ef4444;
         animation: pulse 1.2s infinite ease-in-out;
-    }
-    .voice-input-status {
+    }}
+    .voice-input-status {{
         position: absolute;
         right: 74px;
         top: 18px;
@@ -657,7 +657,7 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         font-size: 0.83rem;
         z-index: 20;
         pointer-events: none;
-    }
+    }}
     </style>
     <script>
     (function() {{
@@ -746,7 +746,7 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
     }})();
     </script>
     """
-    st.markdown(html.format(placeholder_json=placeholder_json, status_text_json=status_text_json), unsafe_allow_html=True)
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def initialize_session_state():
