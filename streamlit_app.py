@@ -665,9 +665,9 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         const statusText = {status_text_json};
 
         function attachVoiceButton() {{
-            const textarea = document.querySelector(`textarea[placeholder="${{placeholder}}"]`);
+            const textarea = Array.from(document.querySelectorAll('textarea')).find(el => el.placeholder === placeholder);
             if (!textarea) return;
-            const parent = textarea.closest('.stTextArea');
+            const parent = textarea.closest('[data-testid="stTextArea"]') || textarea.closest('.stTextArea');
             if (!parent || parent.querySelector('.voice-input-button')) return;
             parent.style.position = 'relative';
             textarea.style.paddingRight = '86px';
@@ -722,7 +722,7 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
             recognition.onresult = function(event) {{
                 let transcript = textarea.value;
                 for (let i = event.resultIndex; i < event.results.length; i++) {{
-                    transcript = event.results[i].isFinal ? transcript + event.results[i][0].transcript : transcript + event.results[i][0].transcript;
+                    transcript = transcript + event.results[i][0].transcript;
                 }}
                 textarea.value = transcript.trim();
                 textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
@@ -742,7 +742,7 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         }});
         observer.observe(document.body, {{ childList: true, subtree: true }});
         attachVoiceButton();
-        setTimeout(attachVoiceButton, 500);
+        setTimeout(attachVoiceButton, 1000);
     }})();
     </script>
     """
