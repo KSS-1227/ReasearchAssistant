@@ -13,6 +13,7 @@ Agents: Document Processor (0 LLM), Literature Scanner (0 LLM), Synthesis Agent 
 
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import pandas as pd
 
@@ -746,7 +747,7 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
     }})();
     </script>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    components.html(html, height=0, scrolling=False)
 
 
 def initialize_session_state():
