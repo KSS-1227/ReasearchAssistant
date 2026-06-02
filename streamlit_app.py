@@ -619,6 +619,135 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 
+def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to speak"):
+    placeholder_json = json.dumps(placeholder)
+    status_text_json = json.dumps(status_text)
+    html = """
+    <style>
+    .voice-input-button {
+        position: absolute;
+        right: 14px;
+        top: 14px;
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        border: none;
+        background: linear-gradient(135deg, #4f8ef7, #7c3aed);
+        color: #ffffff;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 14px 28px rgba(0,0,0,0.2);
+        z-index: 20;
+        transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+    .voice-input-button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 32px rgba(0,0,0,0.24);
+    }
+    .voice-input-button.recording {
+        background: #ef4444;
+        animation: pulse 1.2s infinite ease-in-out;
+    }
+    .voice-input-status {
+        position: absolute;
+        right: 74px;
+        top: 18px;
+        color: #cbd5e1;
+        font-size: 0.83rem;
+        z-index: 20;
+        pointer-events: none;
+    }
+    </style>
+    <script>
+    (function() {{
+        const placeholder = {placeholder_json};
+        const statusText = {status_text_json};
+
+        function attachVoiceButton() {{
+            const textarea = document.querySelector(`textarea[placeholder="${{placeholder}}"]`);
+            if (!textarea) return;
+            const parent = textarea.closest('.stTextArea');
+            if (!parent || parent.querySelector('.voice-input-button')) return;
+            parent.style.position = 'relative';
+            textarea.style.paddingRight = '86px';
+
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'voice-input-button';
+            button.innerHTML = '🎤';
+            parent.appendChild(button);
+
+            const status = document.createElement('div');
+            status.className = 'voice-input-status';
+            status.textContent = statusText;
+            parent.appendChild(status);
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {{
+                button.disabled = true;
+                status.textContent = 'Speech recognition unavailable';
+                return;
+            }}
+
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = true;
+            recognition.continuous = false;
+
+            let listening = false;
+
+            function setStatus(text) {{
+                status.textContent = text;
+            }}
+
+            function setButtonState(active) {{
+                listening = active;
+                button.classList.toggle('recording', active);
+                button.textContent = active ? '⏺️' : '🎤';
+            }}
+
+            recognition.onstart = function() {{
+                setButtonState(true);
+                setStatus('Listening...');
+            }};
+            recognition.onend = function() {{
+                setButtonState(false);
+                setStatus('Tap to speak');
+            }};
+            recognition.onerror = function() {{
+                setButtonState(false);
+                setStatus('Voice capture failed');
+            }};
+            recognition.onresult = function(event) {{
+                let transcript = textarea.value;
+                for (let i = event.resultIndex; i < event.results.length; i++) {{
+                    transcript = event.results[i].isFinal ? transcript + event.results[i][0].transcript : transcript + event.results[i][0].transcript;
+                }}
+                textarea.value = transcript.trim();
+                textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }};
+
+            button.addEventListener('click', function() {{
+                if (listening) {{
+                    recognition.stop();
+                }} else {{
+                    recognition.start();
+                }}
+            }});
+        }}
+
+        const observer = new MutationObserver(function() {{
+            attachVoiceButton();
+        }});
+        observer.observe(document.body, {{ childList: true, subtree: true }});
+        attachVoiceButton();
+        setTimeout(attachVoiceButton, 500);
+    }})();
+    </script>
+    """
+    st.markdown(html.format(placeholder_json=placeholder_json, status_text_json=status_text_json), unsafe_allow_html=True)
+
 
 def initialize_session_state():
 
@@ -1197,6 +1326,7 @@ def render_question_section():
             height=120,
             label_visibility="collapsed"
         )
+        render_speech_to_text_button("e.g., What are the main findings about transformer attention mechanisms?")
 
             
 
@@ -1261,6 +1391,7 @@ def render_question_section():
                 label_visibility="collapsed"
 
             )
+            render_speech_to_text_button("e.g., How do these attention mechanisms compare in terms of computational complexity?")
 
             
 
