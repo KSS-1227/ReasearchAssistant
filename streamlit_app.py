@@ -13,6 +13,7 @@ Agents: Document Processor (0 LLM), Literature Scanner (0 LLM), Synthesis Agent 
 
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import pandas as pd
 
@@ -765,6 +766,203 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
     st.write(html, unsafe_allow_html=True)
 
 
+def render_speech_to_text_button(
+    placeholder: str,
+    status_text: str = "Tap to speak",
+    target_name: str = "",
+):
+    """Attach a browser speech-to-text button to a Streamlit textarea."""
+
+    placeholder_json = json.dumps(placeholder)
+    status_text_json = json.dumps(status_text)
+    target_name_json = json.dumps(target_name)
+    html = f"""
+    <script>
+    (function() {{
+        const placeholder = {placeholder_json};
+        const statusText = {status_text_json};
+        const targetName = {target_name_json};
+        const doc = window.parent.document;
+        const styleId = 'streamlit-cloud-voice-input-styles';
+
+        if (!doc.getElementById(styleId)) {{
+            const style = doc.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+            .voice-input-button {{
+                position: absolute;
+                right: 14px;
+                top: 14px;
+                width: 42px;
+                height: 42px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.18);
+                background: linear-gradient(135deg, #38bdf8, #2563eb);
+                color: #ffffff;
+                cursor: pointer;
+                display: grid;
+                place-items: center;
+                box-shadow: 0 12px 26px rgba(37,99,235,0.28);
+                z-index: 1000;
+                transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+                font-size: 19px;
+                line-height: 1;
+            }}
+            .voice-input-button:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 16px 32px rgba(37,99,235,0.34);
+            }}
+            .voice-input-button.recording {{
+                background: linear-gradient(135deg, #ef4444, #f97316);
+                animation: voicePulse 1.2s infinite ease-in-out;
+            }}
+            .voice-input-status {{
+                position: absolute;
+                right: 66px;
+                top: 22px;
+                color: #cbd5e1;
+                font-size: 0.78rem;
+                line-height: 1;
+                z-index: 1000;
+                pointer-events: none;
+                white-space: nowrap;
+            }}
+            @keyframes voicePulse {{
+                0%, 100% {{ transform: scale(1); opacity: 0.96; }}
+                50% {{ transform: scale(1.12); opacity: 0.72; }}
+            }}
+            `;
+            doc.head.appendChild(style);
+        }}
+
+        function attachVoiceButton() {{
+            const textareas = doc.querySelectorAll('textarea');
+            let textarea = null;
+            for (let ta of textareas) {{
+                if (ta.placeholder.includes(placeholder.substring(0, 20))) {{
+                    textarea = ta;
+                    break;
+                }}
+            }}
+            if (!textarea) return;
+
+            const parent = textarea.closest('[data-testid="stTextArea"]');
+            if (!parent) return;
+            const buttonId = targetName
+                ? `voice-input-${{targetName}}`
+                : `voice-input-${{placeholder.substring(0, 12).replace(/\\W/g, '')}}`;
+            if (parent.querySelector(`#${{buttonId}}`)) return;
+
+            parent.style.position = 'relative';
+            textarea.style.paddingRight = '92px';
+
+            const button = doc.createElement('button');
+            button.type = 'button';
+            button.id = buttonId;
+            button.className = 'voice-input-button';
+            button.innerHTML = '&#127908;';
+            button.title = 'Speech to text';
+            button.setAttribute('aria-label', 'Speech to text');
+            parent.appendChild(button);
+
+            const status = doc.createElement('div');
+            status.className = 'voice-input-status';
+            status.textContent = statusText;
+            parent.appendChild(status);
+
+            const SpeechRecognition =
+                doc.defaultView.SpeechRecognition ||
+                doc.defaultView.webkitSpeechRecognition ||
+                window.SpeechRecognition ||
+                window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {{
+                button.disabled = true;
+                button.title = 'Speech recognition is not supported in this browser';
+                status.textContent = 'Unavailable';
+                return;
+            }}
+
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = true;
+            recognition.continuous = false;
+
+            let listening = false;
+            let baseText = textarea.value.trim();
+
+            function updateTextareaValue(value) {{
+                const textValue = value.trim();
+                const textareaPrototype = doc.defaultView.HTMLTextAreaElement.prototype;
+                const valueSetter = Object.getOwnPropertyDescriptor(textareaPrototype, 'value').set;
+
+                textarea.focus();
+                valueSetter.call(textarea, textValue);
+                textarea.dispatchEvent(new doc.defaultView.InputEvent('input', {{
+                    bubbles: true,
+                    cancelable: true,
+                    inputType: 'insertText',
+                    data: textValue,
+                }}));
+                textarea.dispatchEvent(new doc.defaultView.Event('change', {{ bubbles: true }}));
+            }}
+
+            function setStatus(text) {{
+                status.textContent = text;
+            }}
+
+            function setButtonState(active) {{
+                listening = active;
+                button.classList.toggle('recording', active);
+                button.innerHTML = active ? '&#9632;' : '&#127908;';
+            }}
+
+            recognition.onstart = function() {{
+                baseText = textarea.value.trim();
+                setButtonState(true);
+                setStatus('Listening...');
+            }};
+            recognition.onend = function() {{
+                setButtonState(false);
+                baseText = textarea.value.trim();
+                setStatus(statusText);
+            }};
+            recognition.onerror = function(e) {{
+                setButtonState(false);
+                setStatus(e.error === 'not-allowed' ? 'Mic blocked' : 'Try again');
+            }};
+            recognition.onresult = function(event) {{
+                let finalText = baseText;
+                let interimText = '';
+                for (let i = 0; i < event.results.length; i++) {{
+                    if (event.results[i].isFinal) {{
+                        finalText = `${{finalText}} ${{event.results[i][0].transcript}}`.trim();
+                    }} else {{
+                        interimText += event.results[i][0].transcript;
+                    }}
+                }}
+                updateTextareaValue(`${{finalText}} ${{interimText}}`);
+                setStatus('Writing...');
+            }};
+
+            button.addEventListener('click', function(e) {{
+                e.preventDefault();
+                e.stopPropagation();
+                if (listening) {{
+                    recognition.stop();
+                }} else {{
+                    recognition.start();
+                }}
+            }});
+        }}
+
+        setInterval(attachVoiceButton, 1000);
+        attachVoiceButton();
+    }})();
+    </script>
+    """
+    components.html(html, height=0, width=0)
+
+
 def initialize_session_state():
 
     """Initialize Streamlit session state"""
@@ -1342,7 +1540,10 @@ def render_question_section():
             height=120,
             label_visibility="collapsed"
         )
-        render_speech_to_text_button("e.g., What are the main findings about transformer attention mechanisms?")
+        render_speech_to_text_button(
+            "e.g., What are the main findings about transformer attention mechanisms?",
+            target_name="research-inbox",
+        )
 
             
 
@@ -1407,7 +1608,10 @@ def render_question_section():
                 label_visibility="collapsed"
 
             )
-            render_speech_to_text_button("e.g., How do these attention mechanisms compare in terms of computational complexity?")
+            render_speech_to_text_button(
+                "e.g., How do these attention mechanisms compare in terms of computational complexity?",
+                target_name="followup-inbox",
+            )
 
             
 
