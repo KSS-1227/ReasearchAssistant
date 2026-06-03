@@ -13,7 +13,6 @@ Agents: Document Processor (0 LLM), Literature Scanner (0 LLM), Synthesis Agent 
 
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 import pandas as pd
 
@@ -639,8 +638,9 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         display: grid;
         place-items: center;
         box-shadow: 0 14px 28px rgba(0,0,0,0.2);
-        z-index: 20;
+        z-index: 1000;
         transition: transform 0.18s ease, box-shadow 0.18s ease;
+        font-size: 20px;
     }}
     .voice-input-button:hover {{
         transform: translateY(-1px);
@@ -656,8 +656,12 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         top: 18px;
         color: #cbd5e1;
         font-size: 0.83rem;
-        z-index: 20;
+        z-index: 1000;
         pointer-events: none;
+    }}
+    @keyframes pulse {{
+        0%, 100% {{ transform: scale(1); opacity: 0.92; }}
+        50% {{ transform: scale(1.2); opacity: 0.5; }}
     }}
     </style>
     <script>
@@ -666,10 +670,20 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
         const statusText = {status_text_json};
 
         function attachVoiceButton() {{
-            const textarea = Array.from(document.querySelectorAll('textarea')).find(el => el.placeholder === placeholder);
+            const textareas = document.querySelectorAll('textarea');
+            let textarea = null;
+            for (let ta of textareas) {{
+                if (ta.placeholder.includes(placeholder.substring(0, 20))) {{
+                    textarea = ta;
+                    break;
+                }}
+            }}
             if (!textarea) return;
-            const parent = textarea.closest('[data-testid="stTextArea"]') || textarea.closest('.stTextArea');
-            if (!parent || parent.querySelector('.voice-input-button')) return;
+            
+            const parent = textarea.closest('[data-testid="stTextArea"]');
+            if (!parent) return;
+            if (parent.querySelector('.voice-input-button')) return;
+            
             parent.style.position = 'relative';
             textarea.style.paddingRight = '86px';
 
@@ -677,6 +691,7 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
             button.type = 'button';
             button.className = 'voice-input-button';
             button.innerHTML = '🎤';
+            button.style.cssText = 'position: absolute; right: 14px; top: 14px; width: 44px; height: 44px; border-radius: 999px; border: none; background: linear-gradient(135deg, #4f8ef7, #7c3aed); color: #ffffff; cursor: pointer; display: grid; place-items: center; z-index: 1000;';
             parent.appendChild(button);
 
             const status = document.createElement('div');
@@ -687,7 +702,8 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {{
                 button.disabled = true;
-                status.textContent = 'Speech recognition unavailable';
+                button.title = 'Speech recognition not supported';
+                status.textContent = 'Unavailable';
                 return;
             }}
 
@@ -716,9 +732,9 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
                 setButtonState(false);
                 setStatus('Tap to speak');
             }};
-            recognition.onerror = function() {{
+            recognition.onerror = function(e) {{
                 setButtonState(false);
-                setStatus('Voice capture failed');
+                setStatus('Error');
             }};
             recognition.onresult = function(event) {{
                 let transcript = textarea.value;
@@ -727,9 +743,12 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
                 }}
                 textarea.value = transcript.trim();
                 textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                textarea.dispatchEvent(new Event('change', {{ bubbles: true }}));
             }};
 
-            button.addEventListener('click', function() {{
+            button.addEventListener('click', function(e) {{
+                e.preventDefault();
+                e.stopPropagation();
                 if (listening) {{
                     recognition.stop();
                 }} else {{
@@ -738,16 +757,12 @@ def render_speech_to_text_button(placeholder: str, status_text: str = "Tap to sp
             }});
         }}
 
-        const observer = new MutationObserver(function() {{
-            attachVoiceButton();
-        }});
-        observer.observe(document.body, {{ childList: true, subtree: true }});
+        setInterval(attachVoiceButton, 1000);
         attachVoiceButton();
-        setTimeout(attachVoiceButton, 1000);
     }})();
     </script>
     """
-    components.html(html, height=0, scrolling=False)
+    st.write(html, unsafe_allow_html=True)
 
 
 def initialize_session_state():
