@@ -316,3 +316,5 @@ git status --short
 - Internet connection for Gemini and embedding calls
 - Enough memory for in-session FAISS indexing
 
+# #   C I / C D   P i p e l i n e   A c t i v e  
+ 
