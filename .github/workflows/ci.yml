@@ -1,0 +1,40 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check app imports correctly
+        run: python -c "import streamlit; import langchain; import faiss; print('All imports OK')"
+
+      - name: Build Docker image
+        run: docker build -t research-assistant:${{ github.sha }} .
+
+      - name: Verify Docker image runs
+        run: |
+          docker run -d \
+            --name test-container \
+            -p 8501:8501 \
+            -e GEMINI_API_KEY=test-key \
+            research-assistant:${{ github.sha }}
+          sleep 10
+          docker ps | grep test-container
+          docker stop test-container
