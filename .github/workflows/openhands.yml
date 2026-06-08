@@ -3,32 +3,19 @@ name: OpenHands AI Agent
 on:
   issues:
     types: [labeled]
+  issue_comment:
+    types: [created]
 
 jobs:
-  auto-fix:
-    if: github.event.label.name == 'fix-me'
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run OpenHands Agent
-        uses: All-Hands-AI/openhands-github-action@v1
-        with:
-          prompt: |
-            Please fix this GitHub issue:
-            Title: ${{ github.event.issue.title }}
-            Description: ${{ github.event.issue.body }}
-          repository: ${{ github.repository }}
-          selected-branch: main
-          base-url: https://app.all-hands.dev
-          poll: "true"
-          timeout-seconds: "1800"
-          poll-interval-seconds: "45"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          openhands-api-key: ${{ secrets.OPENHANDS_API_KEY }}
+  call-openhands-resolver:
+    if: |
+      github.event.label.name == 'fix-me' ||
+      (github.event_name == 'issue_comment' &&
+      startsWith(github.event.comment.body, '@openhands-agent'))
+    uses: All-Hands-AI/OpenHands/.github/workflows/openhands-resolver.yml@main
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+      PAT_USERNAME: ${{ secrets.PAT_USERNAME }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
