@@ -21,27 +21,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Upgrade pip
-        run: pip install --upgrade pip
-
-      - name: Install openhands-resolver
-        run: pip install openhands openhands-resolver
-
-      - name: Run resolver
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GITHUB_USERNAME: ${{ secrets.PAT_USERNAME }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-          GITHUB_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+      - name: Run OpenHands Resolver via Docker
         run: |
-          python -m openhands_resolver.resolve_issue \
-            --repo $GITHUB_REPO \
-            --issue-number $ISSUE_NUMBER
+          docker run --rm \
+            -e GITHUB_TOKEN=${{ secrets.PAT_TOKEN }} \
+            -e GITHUB_USERNAME=${{ secrets.PAT_USERNAME }} \
+            -e LLM_MODEL=${{ secrets.LLM_MODEL }} \
+            -e LLM_API_KEY=${{ secrets.LLM_API_KEY }} \
+            -e LLM_BASE_URL=${{ secrets.LLM_BASE_URL }} \
+            -e GITHUB_REPO=${{ github.repository }} \
+            -e ISSUE_NUMBER=${{ github.event.issue.number }} \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            docker.all-hands.dev/all-hands-ai/openhands:main \
+            python -m openhands.resolver.resolve_issue \
+              --repo ${{ github.repository }} \
+              --issue-number ${{ github.event.issue.number }}
