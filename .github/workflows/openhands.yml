@@ -21,25 +21,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install uv
-        run: pip install uv
+      - name: Install dependencies
+        run: pip install requests
 
-      - name: Install openhands-resolver
-        run: uv pip install --system openhands-resolver==0.3.1 --prerelease=allow
-
-      - name: Run resolver
+      - name: Run Issue Agent
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GITHUB_USERNAME: ${{ secrets.PAT_USERNAME }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
-        run: |
-          python -m openhands_resolver.resolve_issue \
-            --repo ${{ github.repository }} \
-            --issue-number ${{ github.event.issue.number }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: python .github/scripts/issue_agent.py
