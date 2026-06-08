@@ -89,7 +89,16 @@ Respond with JSON only. No markdown, no explanation outside JSON."""
     # strip markdown fences if present
     raw = re.sub(r"^```json\s*", "", raw.strip())
     raw = re.sub(r"\s*```$", "", raw.strip())
-    return json.loads(raw)
+    # Fix unescaped control characters in JSON
+    raw = raw.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Try extracting JSON block manually
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
 
 # ── Step 4: Create a branch ──────────────────────────────────────────────
 def get_main_sha():
