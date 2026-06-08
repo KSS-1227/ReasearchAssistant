@@ -1,0 +1,28 @@
+name: OpenHands AI Agent
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  auto-fix:
+    if: github.event.label.name == 'fix-me'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run OpenHands Agent
+        uses: All-Hands-AI/openhands-github-action@v1
+        with:
+          prompt: |
+            Please fix this GitHub issue:
+            Title: ${{ github.event.issue.title }}
+            Description: ${{ github.event.issue.body }}
+          repository: ${{ github.repository }}
+          openhands-api-key: ${{ secrets.OPENHANDS_API_KEY }}
