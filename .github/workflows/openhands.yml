@@ -33,7 +33,7 @@ jobs:
         run: pip install openhands-resolver --no-deps
 
       - name: Install dependencies
-        run: pip install litellm githubkit pydantic
+        run: pip install litellm githubkit pydantic termcolor toml
 
       - name: Run resolver
         env:
