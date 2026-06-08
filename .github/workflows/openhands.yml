@@ -30,7 +30,7 @@ jobs:
         run: pip install uv
 
       - name: Install openhands-resolver
-        run: uv pip install --system openhands-resolver==0.3.1
+        run: uv pip install --system openhands-resolver==0.3.1 --prerelease=allow
 
       - name: Run resolver
         env:
