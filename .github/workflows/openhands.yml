@@ -25,4 +25,10 @@ jobs:
             Title: ${{ github.event.issue.title }}
             Description: ${{ github.event.issue.body }}
           repository: ${{ github.repository }}
+          selected-branch: main
+          base-url: https://app.all-hands.dev
+          poll: "true"
+          timeout-seconds: "1800"
+          poll-interval-seconds: "45"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           openhands-api-key: ${{ secrets.OPENHANDS_API_KEY }}
