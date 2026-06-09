@@ -22,9 +22,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Check app imports correctly
-        run: python -c "import streamlit; import langchain; import faiss; print('All imports OK')"
-
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
       - name: Build Docker image
         run: docker build -t research-assistant:${{ github.sha }} .
 
