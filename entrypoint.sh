@@ -1,4 +1,5 @@
 #!/bin/bash
+# -*- coding: utf-8 -*-
 # Entrypoint - starts FastAPI backend then Streamlit frontend
 
 echo "======================================"
@@ -44,22 +45,10 @@ for i in $(seq 1 30); do
     sleep 2
 done
 
-# Start Streamlit frontend
+# Start Streamlit frontend (replace shell with Streamlit)
 echo "Starting Streamlit on port 8501..."
-streamlit run streamlit_app.py \
+exec streamlit run streamlit_app.py \
     --server.port=8501 \
     --server.address=0.0.0.0 \
     --server.headless=true \
-    --logger.level=info &
-STREAMLIT_PID=$!
-
-echo "======================================"
-echo "Both services started!"
-echo "   Streamlit: http://0.0.0.0:8501"
-echo "   FastAPI:   http://0.0.0.0:8000/docs"
-echo "======================================"
-
-# Keep container alive - exit if either process dies
-wait -n
-echo "A service exited. Shutting down..."
-cleanup
+    --logger.level=info
