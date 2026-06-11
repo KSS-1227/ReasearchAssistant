@@ -1,5 +1,5 @@
 #!/bin/bash
-# Entrypoint — starts FastAPI backend then Streamlit frontend
+# Entrypoint - starts FastAPI backend then Streamlit frontend
 
 echo "======================================"
 echo "Starting Research Assistant..."
@@ -20,7 +20,7 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT
 
-# Start FastAPI backend (1 worker — safe for containers)
+# Start FastAPI backend (1 worker - safe for containers)
 echo "Starting FastAPI on port 8000..."
 python -m uvicorn fastapi_app:app \
     --host 0.0.0.0 \
@@ -33,11 +33,11 @@ FASTAPI_PID=$!
 echo "Waiting for FastAPI to be ready..."
 for i in $(seq 1 30); do
     if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-        echo "✅ FastAPI ready (${i}s)"
+        echo "FastAPI ready (${i}s)"
         break
     fi
     if ! kill -0 "$FASTAPI_PID" 2>/dev/null; then
-        echo "❌ FastAPI process died. Exiting."
+        echo "FastAPI process died. Exiting."
         exit 1
     fi
     echo "  Waiting... ($i/30)"
@@ -54,12 +54,12 @@ streamlit run streamlit_app.py \
 STREAMLIT_PID=$!
 
 echo "======================================"
-echo "✅ Both services started!"
+echo "Both services started!"
 echo "   Streamlit: http://0.0.0.0:8501"
 echo "   FastAPI:   http://0.0.0.0:8000/docs"
 echo "======================================"
 
-# Keep container alive — exit if either process dies
+# Keep container alive - exit if either process dies
 wait -n
 echo "A service exited. Shutting down..."
 cleanup
