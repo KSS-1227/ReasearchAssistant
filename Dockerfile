@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Copy entrypoint script
+COPY entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
+
 # Copy and install dependencies first (better caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -15,14 +19,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all project files
 COPY . .
 
-# Streamlit port
-EXPOSE 8501
+# Expose both Streamlit and FastAPI ports
+EXPOSE 8501 8000
 
-# Health check
+# Health check (check Streamlit)
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
-# Run the app
-CMD ["streamlit", "run", "streamlit_app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true"]
+# Run entrypoint script that starts both services
+ENTRYPOINT ["/app/entrypoint.sh"]

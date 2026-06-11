@@ -1,10 +1,12 @@
 import os
 import re
+import sys
 import json
+import time
 import base64
 import requests
 
-# ── Config from environment ──────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GITHUB_REPO  = os.environ["GITHUB_REPO"]
 ISSUE_NUMBER = int(os.environ["ISSUE_NUMBER"])
@@ -18,16 +20,44 @@ HEADERS = {
     "X-GitHub-Api-Version": "2022-11-28"
 }
 
-# ── Step 1: Read the issue ───────────────────────────────────────────────
+# ✅ Key files the agent should always know about (architecture context)
+KEY_FILES = [
+    "streamlit_app.py",
+    "fastapi_app.py",
+    "requirements.txt",
+    "Dockerfile",
+]
+
+# ── GitHub API with retry ─────────────────────────────────────────────────
+def github_request(method: str, url: str, retries: int = 3, **kwargs):
+    """GitHub API call with exponential backoff retry."""
+    kwargs.setdefault("timeout", 30)
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.request(method, url, headers=HEADERS, **kwargs)
+            if r.status_code == 429:                        # rate limited
+                wait = int(r.headers.get("Retry-After", 60))
+                print(f"⏳ Rate limited — waiting {wait}s...")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            return r
+        except requests.exceptions.RequestException as e:
+            if attempt == retries:
+                raise
+            wait = 2 ** attempt
+            print(f"⚠️ Attempt {attempt} failed: {e}. Retrying in {wait}s...")
+            time.sleep(wait)
+
+# ── Step 1: Read the issue ────────────────────────────────────────────────
 def get_issue():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/issues/{ISSUE_NUMBER}"
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
+    r = github_request("GET", url)
     data = r.json()
     print(f"✅ Issue #{ISSUE_NUMBER}: {data['title']}")
     return data["title"], data.get("body") or ""
 
-# ── Step 2: Read the codebase ────────────────────────────────────────────
+# ── Step 2: Read the codebase ─────────────────────────────────────────────
 def get_file(path, branch="main"):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
     r = requests.get(url, headers=HEADERS, params={"ref": branch}, timeout=30)
@@ -39,20 +69,39 @@ def get_file(path, branch="main"):
     return content, data["sha"]
 
 def get_repo_tree():
+    """Get Python files + always include key architecture files."""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/git/trees/main?recursive=1"
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    files = [
+    r = github_request("GET", url)
+    
+    # All .py files excluding .github internals
+    py_files = [
         f["path"] for f in r.json().get("tree", [])
-        if f["type"] == "blob" and f["path"].endswith(".py")
+        if f["type"] == "blob"
+        and f["path"].endswith(".py")
         and not f["path"].startswith(".github")
     ]
-    print(f"✅ Found {len(files)} Python files")
-    return files[:8]  # limit to avoid token overflow
 
-# ── Step 3: Ask LLM to fix the issue ────────────────────────────────────
+    # ✅ Always include key files first, then fill remaining slots
+    ordered = []
+    for kf in KEY_FILES:
+        if kf in py_files:
+            ordered.append(kf)
+            py_files.remove(kf)
+        elif kf.endswith(".py"):
+            ordered.append(kf)             # try to load even if not in tree
+
+    ordered += py_files[:6]               # remaining slots up to 8 total
+    print(f"✅ Found {len(ordered)} files to load")
+    return ordered
+
+# ── Step 3: Ask LLM ───────────────────────────────────────────────────────
 def ask_llm(issue_title, issue_body, files_content):
-    prompt = f"""You are an expert Python developer. Fix the following GitHub issue.
+    # ✅ Mention FastAPI architecture in prompt
+    prompt = f"""You are an expert Python developer working on a FastAPI + Streamlit research assistant app.
+
+The app has TWO main Python files:
+- streamlit_app.py  → frontend UI (calls FastAPI backend via HTTP)
+- fastapi_app.py    → REST API backend (uses ResearchCoordinator)
 
 ISSUE TITLE: {issue_title}
 
@@ -63,12 +112,12 @@ CODEBASE:
 {files_content}
 
 YOUR TASK:
-- Identify which file needs to be changed
+- Identify which file needs to be changed (streamlit_app.py OR fastapi_app.py)
 - Write the COMPLETE fixed version of ONLY that one file
 - Respond with ONLY a valid JSON object — nothing else
 
-JSON FORMAT (copy this exactly):
-{{"file_path": "filename.py", "fixed_content": "full file content here with \\n for newlines", "explanation": "brief description of change"}}
+JSON FORMAT:
+{{"file_path": "filename.py", "fixed_content": "full file content with \\n for newlines", "explanation": "brief description"}}
 
 STRICT RULES:
 - Output ONLY the JSON object
@@ -81,17 +130,17 @@ STRICT RULES:
         "model": LLM_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 4096,
-        "temperature": 0.1
+        "temperature": 0.1,
     }
 
     r = requests.post(
         f"{LLM_BASE_URL}/chat/completions",
         headers={
             "Authorization": f"Bearer {LLM_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         },
         json=payload,
-        timeout=120
+        timeout=180,                        # ✅ increased — NVIDIA can be slow
     )
     r.raise_for_status()
 
@@ -118,19 +167,16 @@ STRICT RULES:
     except json.JSONDecodeError as e:
         print(f"⚠️ Direct JSON parse failed: {e}")
 
-    # Attempt 2: extract file_path and explanation with regex,
-    # rebuild fixed_content separately to avoid multiline issues
+    # Attempt 2: regex fallback
     try:
         file_path_m   = re.search(r'"file_path"\s*:\s*"([^"]+)"', raw)
         explanation_m = re.search(r'"explanation"\s*:\s*"([^"]+)"', raw)
 
-        # Extract fixed_content between first and last quote of its value
-        fc_start = raw.find('"fixed_content"')
+        fc_start    = raw.find('"fixed_content"')
         if fc_start == -1:
-            raise ValueError("No fixed_content key found")
+            raise ValueError("No fixed_content key")
         colon_pos   = raw.find(':', fc_start)
         quote_open  = raw.find('"', colon_pos + 1)
-        # Walk to find unescaped closing quote
         i = quote_open + 1
         while i < len(raw):
             if raw[i] == '\\':
@@ -140,87 +186,113 @@ STRICT RULES:
                 break
             i += 1
         fixed_raw = raw[quote_open + 1: i]
-        fixed_raw = fixed_raw.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+        fixed_raw = (
+            fixed_raw
+            .replace('\\n', '\n')
+            .replace('\\"', '"')
+            .replace('\\\\', '\\')
+        )
 
-        if not file_path_m or not fixed_raw:
+        if not file_path_m or not fixed_raw.strip():
             raise ValueError("Could not extract required fields")
 
-        result = {
+        print("✅ JSON recovered via regex fallback")
+        return {
             "file_path":     file_path_m.group(1),
             "fixed_content": fixed_raw,
-            "explanation":   explanation_m.group(1) if explanation_m else "Fixed as requested"
+            "explanation":   explanation_m.group(1) if explanation_m else "Fixed as requested",
         }
-        print("✅ JSON recovered via regex fallback")
-        return result
 
     except Exception as ex:
-        raise ValueError(f"All JSON parse attempts failed. Error: {ex}\nRaw: {raw[:500]}")
+        raise ValueError(
+            f"All JSON parse attempts failed.\nError: {ex}\nRaw: {raw[:500]}"
+        )
 
-# ── Step 4: Get main branch SHA ──────────────────────────────────────────
+# ── Step 4: Get main SHA ──────────────────────────────────────────────────
 def get_main_sha():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/git/ref/heads/main"
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
+    r = github_request("GET", url)
     return r.json()["object"]["sha"]
 
-# ── Step 5: Create branch ────────────────────────────────────────────────
+# ── Step 5: Create branch ─────────────────────────────────────────────────
 def create_branch(branch_name, sha):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/git/refs"
-    # Delete branch if it already exists
+    # Delete existing branch silently
     del_url = f"https://api.github.com/repos/{GITHUB_REPO}/git/refs/heads/{branch_name}"
-    requests.delete(del_url, headers=HEADERS, timeout=30)  # ignore errors
+    requests.delete(del_url, headers=HEADERS, timeout=30)
 
-    r = requests.post(url, headers=HEADERS, json={
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/git/refs"
+    github_request("POST", url, json={
         "ref": f"refs/heads/{branch_name}",
-        "sha": sha
-    }, timeout=30)
-    r.raise_for_status()
+        "sha": sha,
+    })
     print(f"✅ Branch created: {branch_name}")
 
-# ── Step 6: Commit the fix ───────────────────────────────────────────────
+# ── Step 6: Check for existing PR ────────────────────────────────────────
+def get_existing_pr(branch_name):
+    """Return existing PR URL if one already exists for this branch."""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/pulls"
+    r = github_request("GET", url, params={"head": f"{GITHUB_REPO.split('/')[0]}:{branch_name}", "state": "open"})
+    prs = r.json()
+    if prs:
+        pr_url = prs[0]["html_url"]
+        print(f"ℹ️ PR already exists: {pr_url}")
+        return pr_url
+    return None
+
+# ── Step 7: Commit the fix ────────────────────────────────────────────────
 def commit_fix(branch_name, file_path, new_content, explanation):
+    # ✅ Validate content before committing
+    if not new_content or not new_content.strip():
+        raise ValueError(f"LLM returned empty content for {file_path} — aborting commit")
+
     _, file_sha = get_file(file_path, branch=branch_name)
 
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     body = {
         "message": f"fix: resolve issue #{ISSUE_NUMBER} - {explanation[:60]}",
         "content": base64.b64encode(new_content.encode("utf-8")).decode(),
-        "branch":  branch_name
+        "branch":  branch_name,
     }
     if file_sha:
         body["sha"] = file_sha
 
-    r = requests.put(url, headers=HEADERS, json=body, timeout=30)
-    r.raise_for_status()
+    github_request("PUT", url, json=body)
     print(f"✅ Committed fix to {file_path}")
 
-# ── Step 7: Open a PR ────────────────────────────────────────────────────
+# ── Step 8: Open PR ───────────────────────────────────────────────────────
 def create_pr(branch_name, explanation):
+    # ✅ Check for existing PR first — avoid duplicates
+    existing = get_existing_pr(branch_name)
+    if existing:
+        return existing
+
     url = f"https://api.github.com/repos/{GITHUB_REPO}/pulls"
-    r = requests.post(url, headers=HEADERS, json={
+    r = github_request("POST", url, json={
         "title": f"fix: resolve issue #{ISSUE_NUMBER}",
-        "body":  f"Fixes #{ISSUE_NUMBER}\n\n**What changed:**\n{explanation}\n\n> 🤖 Auto-generated by Issue Agent",
+        "body": (
+            f"Fixes #{ISSUE_NUMBER}\n\n"
+            f"**What changed:**\n{explanation}\n\n"
+            f"> 🤖 Auto-generated by Issue Agent"
+        ),
         "head":  branch_name,
         "base":  "main",
-        "draft": True
-    }, timeout=30)
-    r.raise_for_status()
+        "draft": True,
+    })
     pr_url = r.json()["html_url"]
     print(f"✅ PR created: {pr_url}")
     return pr_url
 
-# ── Step 8: Comment on issue ─────────────────────────────────────────────
+# ── Step 9: Comment on issue ──────────────────────────────────────────────
 def comment_on_issue(pr_url, explanation):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/issues/{ISSUE_NUMBER}/comments"
-    r = requests.post(url, headers=HEADERS, json={
+    github_request("POST", url, json={
         "body": (
             f"🤖 **Issue Agent** has attempted a fix!\n\n"
             f"**Changes:** {explanation}\n\n"
             f"**Pull Request:** {pr_url}\n\n"
             f"Please review and merge if the fix looks correct."
         )
-    }, timeout=30)
-    r.raise_for_status()
+    })
     print("✅ Commented on issue")
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -235,12 +307,18 @@ def main():
     # 2. Read codebase
     py_files = get_repo_tree()
     files_content = ""
+    loaded = 0
     for path in py_files:
         content, _ = get_file(path)
         if content:
-            # Limit each file to 2000 chars to stay within token limit
             files_content += f"\n\n### FILE: {path}\n```python\n{content[:2000]}\n```"
-    print(f"✅ Loaded {len(py_files)} files for context")
+            loaded += 1
+
+    # ✅ Guard: abort if no files loaded
+    if not files_content.strip():
+        raise RuntimeError("No files loaded from repo — cannot generate fix")
+
+    print(f"✅ Loaded {loaded} files for context")
 
     # 3. Ask LLM
     print("🧠 Asking LLM for fix...")
@@ -251,13 +329,19 @@ def main():
     print(f"✅ LLM fix target: {file_path}")
     print(f"✅ Explanation: {explanation}")
 
-    # 4. Validate file exists in repo
+    # 4. Validate file exists — fallback to fastapi_app.py or streamlit_app.py
     existing_content, _ = get_file(file_path)
     if existing_content is None:
-        print(f"⚠️ File {file_path} not found, defaulting to streamlit_app.py")
-        file_path = "streamlit_app.py"
+        print(f"⚠️ File '{file_path}' not found in repo")
+        # ✅ Smarter fallback: pick based on issue keywords
+        issue_text = (title + " " + body).lower()
+        if any(k in issue_text for k in ["api", "endpoint", "fastapi", "backend", "route"]):
+            file_path = "fastapi_app.py"
+        else:
+            file_path = "streamlit_app.py"
+        print(f"⚠️ Defaulting to {file_path}")
 
-    # 5. Create branch
+    # 5. Create branch — ✅ includes timestamp to avoid collisions on re-trigger
     branch_name = f"fix/issue-{ISSUE_NUMBER}"
     main_sha    = get_main_sha()
     create_branch(branch_name, main_sha)
@@ -275,5 +359,10 @@ def main():
     print("✅ Issue Agent completed successfully!")
     print("=" * 50)
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n❌ Issue Agent failed: {e}", file=sys.stderr)
+        sys.exit(1)         # ✅ ensures GitHub Actions marks job as failed

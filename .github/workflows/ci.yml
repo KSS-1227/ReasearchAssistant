@@ -17,13 +17,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"        # ✅ matches local environment
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run tests
         run: pytest tests/ -v --tb=short
+
       - name: Build Docker image
         run: docker build -t research-assistant:${{ github.sha }} .
 
@@ -32,8 +33,34 @@ jobs:
           docker run -d \
             --name test-container \
             -p 8501:8501 \
+            -p 8000:8000 \
             -e GEMINI_API_KEY=test-key \
             research-assistant:${{ github.sha }}
-          sleep 10
-          docker ps | grep test-container
-          docker stop test-container
+
+          # Wait for FastAPI health endpoint (up to 60s)
+          echo "Waiting for FastAPI to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✅ FastAPI ready at attempt $i"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+          # Verify FastAPI is healthy
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
+          echo "FastAPI health status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ FastAPI health check failed"
+            docker logs test-container
+            exit 1
+          fi
+
+          echo "✅ Container is healthy"
+
+      - name: Cleanup test container
+        if: always()                    # ✅ runs even if previous step fails
+        run: |
+          docker stop test-container 2>/dev/null || true
+          docker rm test-container 2>/dev/null || true
