@@ -1,124 +1,175 @@
-# Research Assistant AI
+# 📚 Research Assistant AI
 
-A Streamlit research assistant that lets you upload academic documents, ask questions, and receive citation-aware synthesis from a deterministic multi-agent RAG pipeline.
+A production-grade, citation-aware research synthesis system built on a **FastAPI + Streamlit** architecture with a deterministic 3-agent RAG pipeline powered by Google Gemini.
 
-Live demo: https://reasearchassistant.streamlit.app/
+> Live demo: https://reasearchassistant.streamlit.app/
+
+---
 
 ## What It Does
 
-- Upload PDF, TXT, or Markdown research documents.
-- Build an in-session FAISS vector index using Google embeddings.
-- Generate suggested research questions from uploaded content.
-- Ask custom or follow-up questions through a Streamlit inbox.
-- Use browser speech-to-text from the question inbox microphone button.
-- Retrieve relevant chunks with deterministic ranking and reranking.
-- Extract citations, key quotes, source metadata, and citation-network signals.
-- Generate a structured synthesis with Gemini and source labels such as `[Paper 1]`.
-- Show traceable results across literature discovery, citation analysis, quotes, gaps, limitations, and metrics.
+- Upload PDF, TXT, or Markdown research documents (up to 50 MB each)
+- Build an in-session FAISS vector index using Google `text-embedding-004` embeddings
+- Auto-navigate through a guided 3-step workflow: Upload → Process → Ask
+- Generate suggested research questions directly from your uploaded content
+- Click any suggested question to auto-paste it into the custom question input
+- Ask research questions and receive structured, citation-aware synthesis
+- View results across tabbed panels: Findings, Gaps, Contributions, Analysis, Metrics, Raw JSON
+- Download any synthesis result as a structured JSON file
+- Track LLM calls, cost, retrieval confidence, and agent performance in real time
 
-## Current Architecture
+---
 
-```text
-Uploaded documents
-      |
-      v
-DocumentProcessor
-  - validates uploads
-  - loads PDF/TXT/MD files
-  - chunks text
-  - creates Google embeddings
-  - builds FAISS index
-      |
-      v
-User question
-      |
-      v
-ResearchCoordinator
-  - validates query
-  - classifies domain with keyword rules
-  - runs the agent pipeline
-      |
-      +--> LiteratureScanner      0 LLM calls
-      |    FAISS search, dynamic-k retrieval, reranking
-      |
-      +--> CitationExtractor      0 LLM calls
-      |    regex citation parsing, key quote extraction, author stats
-      |
-      +--> SynthesisAgent         1 LLM call
-           Gemini synthesis with a citation-aware prompt
+## Architecture
+
+```
+User uploads documents
+        │
+        ▼
+┌─────────────────────┐
+│   Streamlit UI      │  ← 3-step guided flow (Upload → Process → Ask)
+│   (streamlit_app.py)│     session_state-driven tab navigation
+└────────┬────────────┘
+         │ HTTP (requests)
+         ▼
+┌─────────────────────┐
+│   FastAPI Backend   │  ← REST API (fastapi_app.py)
+│   /upload           │     per-session coordinator instances
+│   /process          │     in-memory session management
+│   /ask              │
+│   /suggested-questions
+│   /health  /status  │
+└────────┬────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────┐
+│               ResearchCoordinator                   │
+│  (core/coordinator.py)                              │
+│                                                     │
+│  Step 1 → LiteratureScanner     (0 LLM calls)       │
+│           FAISS search, dynamic-k, re-ranking       │
+│                                                     │
+│  Step 2 → CitationExtractor     (0 LLM calls)       │
+│           regex citations, key quotes, author stats │
+│                                                     │
+│  Step 3 → SynthesisAgent        (1 LLM call)        │
+│           citation-aware Gemini prompt              │
+│           [Paper N] citation index injected         │
+│           deterministic fallback on LLM failure     │
+└─────────────────────────────────────────────────────┘
 ```
 
-The main research answer is designed around one synthesis LLM call per user query. Suggested-question generation is a separate helper step and may use an additional LLM call when recommendations are generated.
+**Design principle:** exactly **1 Gemini LLM call per user query**. Document retrieval, citation extraction, and domain classification are all deterministic — zero LLM calls.
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
-| --- | --- |
-| UI | Streamlit |
-| LLM | Google Gemini via `google-genai` |
-| Default model | `gemini-2.5-flash` |
-| Embeddings | `models/text-embedding-004` |
+|---|---|
+| UI | Streamlit ≥ 1.35 |
+| API backend | FastAPI + Uvicorn |
+| LLM | Google Gemini (`gemini-2.5-flash`) via `google-genai` |
+| Embeddings | Google `models/text-embedding-004` (768-dim) |
 | Vector search | FAISS CPU |
-| Document loading | LangChain loaders |
+| Document loading | LangChain (`PyPDFLoader`, `TextLoader`) |
 | Text splitting | LangChain `RecursiveCharacterTextSplitter` |
 | Validation | Pydantic v2 |
 | Environment | `python-dotenv` |
+| Containerisation | Docker |
+| Orchestration | Kubernetes (k8s/) |
+| CI/CD | GitHub Actions |
+
+---
 
 ## Project Structure
 
-```text
-.
-|-- streamlit_app.py              # Streamlit UI, 3-step workflow, speech-to-text inbox
-|-- agents/
-|   |-- base_agent.py             # Agent base class and metrics
-|   |-- literature_scanner.py     # FAISS retrieval and deterministic reranking
-|   |-- citation_extractor.py     # Citation, quote, and metadata extraction
-|   `-- synthesis_agent.py        # Gemini synthesis and fallback synthesis
-|-- core/
-|   |-- coordinator.py            # Pipeline orchestration
-|   |-- document_processor.py     # Upload validation, loading, chunking, indexing
-|   |-- google_embeddings.py      # Google embedding wrapper
-|   |-- llm_interface.py          # Gemini client, retries, token/cost tracking
-|   |-- memory.py                 # Session and agent metrics
-|   |-- models.py                 # Shared data models
-|   |-- pipeline_logger.py        # Structured query logging
-|   `-- prompts.py                # Citation-aware synthesis prompts
-|-- config/
-|   `-- settings.py               # Models, limits, pricing, domain keywords
-|-- data/                         # Sample/reference documents
-|-- logs/                         # Runtime logs
-|-- env_template.txt              # Environment variable template
-|-- requirements.txt              # Python dependencies
-|-- Documentation.pdf
-|-- USECASE_DIAGRAM.md
-`-- usecase_diagram.puml
 ```
+ReasearchAssistant/
+│
+├── streamlit_app.py              # Streamlit UI — 3-step workflow, session_state navigation
+├── fastapi_app.py                # FastAPI REST backend — session management, endpoints
+│
+├── agents/
+│   ├── base_agent.py             # Abstract base class, performance tracking, execute_with_tracking
+│   ├── literature_scanner.py     # FAISS retrieval, dynamic-k selection, re-ranking (0 LLM calls)
+│   ├── citation_extractor.py     # Regex citation parsing, key quote mining, author stats (0 LLM calls)
+│   └── synthesis_agent.py        # Citation-aware Gemini synthesis, [Paper N] index, fallback (1 LLM call)
+│
+├── core/
+│   ├── coordinator.py            # 3-agent pipeline orchestration, domain classification, confidence scoring
+│   ├── document_processor.py     # File validation, PDF/TXT/MD loading, chunking, FAISS indexing
+│   ├── google_embeddings.py      # Google text-embedding-004 wrapper
+│   ├── llm_interface.py          # Gemini client, retry logic, token counting, cost tracking
+│   ├── llm_interface_fixed.py    # Patched LLM interface variant
+│   ├── memory.py                 # In-session ResearchSession and SystemMetrics tracking
+│   ├── models.py                 # Pydantic + dataclass models (Paper, ResearchSynthesis, etc.)
+│   ├── pipeline_logger.py        # Async JSON structured logging to logs/pipeline_logs.jsonl
+│   └── prompts.py                # Citation-aware synthesis prompt builder
+│
+├── config/
+│   └── settings.py               # SystemConfig, DOMAIN_KEYWORDS, pricing table, LOGGING_CONFIG
+│
+├── data/                         # Sample research papers (13 transformer / attention PDFs)
+│   ├── Attention Is All You Need.pdf
+│   ├── Longformer The Long-Document Transformer.pdf
+│   └── ...
+│
+├── k8s/
+│   ├── deployment.yaml           # Kubernetes Deployment — 2 replicas, resource limits, health probes
+│   ├── api-service.yaml          # Kubernetes Service for FastAPI
+│   └── service.yaml              # Kubernetes Service for Streamlit
+│
+├── tests/
+│   ├── __init__.py
+│   └── test_app.py               # Pytest test suite
+│
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml                # CI: install → test → docker build → health check
+│   │   ├── deploy.yml            # CD: deploy pipeline
+│   │   └── openhands.yml         # OpenHands agent workflow
+│   └── scripts/
+│       └── issue_agent.py        # GitHub issue automation agent
+│
+├── logs/
+│   └── pipeline_logs.jsonl       # Runtime structured query logs (auto-generated)
+│
+├── Dockerfile                    # Multi-service image — exposes :8501 (Streamlit) + :8000 (FastAPI)
+├── entrypoint.sh                 # Container startup — launches both FastAPI and Streamlit
+├── requirements.txt              # Python dependencies
+├── env_template.txt              # Environment variable template
+├── .env                          # Local secrets (git-ignored)
+├── .dockerignore
+├── .gitignore
+├── USECASE_DIAGRAM.md
+├── usecase_diagram.puml
+└── Documentation.pdf
+```
+
+---
 
 ## Quick Start
 
-### 1. Clone and Enter the Project
+### 1. Clone
 
 ```bash
 git clone https://github.com/KSS-1227/ReasearchAssistant.git
 cd ReasearchAssistant
 ```
 
-If you are using the downloaded project folder directly, run commands from the project root.
-
-### 2. Create a Virtual Environment
+### 2. Create Virtual Environment
 
 ```bash
 python -m venv .venv
 ```
 
-Windows PowerShell:
-
+Windows:
 ```bash
 .venv\Scripts\Activate.ps1
 ```
 
-macOS/Linux:
-
+macOS / Linux:
 ```bash
 source .venv/bin/activate
 ```
@@ -129,192 +180,237 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment Variables
-
-Create a `.env` file:
+### 4. Configure Environment
 
 ```bash
 cp env_template.txt .env
 ```
 
-Set your Gemini key:
-
+Edit `.env`:
 ```env
-GEMINI_API_KEY=your-gemini-api-key
+GEMINI_API_KEY=your-gemini-api-key-here
 ```
 
-You can create a key from Google AI Studio: https://aistudio.google.com/app/apikey
+Get a key at: https://aistudio.google.com/app/apikey
 
-### 5. Run the App
+### 5. Start FastAPI Backend
 
+```bash
+uvicorn fastapi_app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 6. Start Streamlit UI
+
+In a second terminal (with venv active):
 ```bash
 python -m streamlit run streamlit_app.py
 ```
 
-Open:
+Open: http://localhost:8501
 
-```text
-http://localhost:8501
-```
+---
 
 ## How To Use
 
-1. Upload documents in Step 1.
-   Supported formats are `.pdf`, `.txt`, and `.md`.
+| Step | Action |
+|---|---|
+| **1. Upload** | Select `.pdf`, `.txt`, or `.md` files → click **Upload** → auto-navigates to Process |
+| **2. Process** | Click **Process Documents** → builds FAISS index → auto-navigates to Ask |
+| **3. Ask** | Type a question or click **Generate Suggestions** → pick a suggestion to auto-paste it → click **Ask & Synthesize** |
+| **4. Review** | Browse Findings, Gaps, Contributions, Analysis, Metrics, Raw JSON tabs |
+| **5. Download** | Click **Download as JSON** to save the full synthesis result |
+| **Reset** | Click **New Session** in the sidebar to start fresh |
 
-2. Process the documents in Step 2.
-   The app validates files, extracts text, chunks content, creates embeddings, and builds the FAISS index.
+---
 
-3. Ask a question in Step 3.
-   Use a suggested question, type your own, or click the microphone button in the top-right of the inbox to dictate your question.
+## API Reference
 
-4. Review the result tabs.
-   The app shows literature matches, citations, key quotes, research gaps, limitations, and performance metrics.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Health check — returns status and version |
+| `GET` | `/status` | System stats — active sessions, docs processed, questions asked, uptime |
+| `POST` | `/upload` | Upload documents — creates a new session, returns `session_id` |
+| `POST` | `/process` | Process uploaded documents — builds FAISS vector index |
+| `POST` | `/ask` | Ask a research question — runs the 3-agent pipeline, returns synthesis |
+| `GET` | `/suggested-questions` | Generate suggested questions from indexed documents |
+| `DELETE` | `/reset` | Delete session and clean up all resources |
 
-5. Ask follow-up questions.
-   After the first answer, a follow-up inbox appears with the same speech-to-text support.
+Interactive docs: http://localhost:8000/docs
 
-## Speech-To-Text Notes
+---
 
-The microphone feature uses the browser Web Speech API through a lightweight Streamlit component. It does not require server-side audio packages, so it is suitable for Streamlit Cloud.
+## Docker
 
-Important browser notes:
+### Build
 
-- Works best in Chrome or Edge.
-- Requires microphone permission from the browser.
-- Streamlit Cloud works because it is served over HTTPS.
-- Some browsers, especially Firefox, may not support the Web Speech API.
+```bash
+docker build -t research-assistant:latest .
+```
 
-## Configuration Highlights
+### Run
 
-Most settings live in `config/settings.py`.
+```bash
+docker run -d \
+  -p 8501:8501 \
+  -p 8000:8000 \
+  -e GEMINI_API_KEY=your-key-here \
+  research-assistant:latest
+```
 
-| Setting | Current value |
-| --- | --- |
+Both services start via `entrypoint.sh`. Streamlit is available at `:8501`, FastAPI at `:8000`.
+
+---
+
+## Kubernetes
+
+### Prerequisites
+
+- A running Kubernetes cluster (e.g. minikube, kind, or cloud provider)
+- `kubectl` configured
+
+### Create Secret
+
+```bash
+kubectl create secret generic research-assistant-secrets \
+  --from-literal=GEMINI_API_KEY=your-key-here
+```
+
+### Deploy
+
+```bash
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/api-service.yaml
+kubectl apply -f k8s/service.yaml
+```
+
+### Check Status
+
+```bash
+kubectl get pods
+kubectl get services
+```
+
+The deployment runs **2 replicas** with liveness and readiness probes on `GET /health`.
+
+---
+
+## CI/CD
+
+GitHub Actions runs on every push and pull request to `main`:
+
+1. Checkout code
+2. Set up Python 3.12
+3. `pip install -r requirements.txt`
+4. `pytest tests/ -v --tb=short`
+5. `docker build`
+6. Start container, wait for `GET /health` → 200
+7. Cleanup container
+
+Workflow file: `.github/workflows/ci.yml`
+
+---
+
+## Configuration Reference
+
+All settings are in `config/settings.py`.
+
+| Setting | Value |
+|---|---|
 | Default model | `gemini-2.5-flash` |
-| Target LLM calls per query | `1` |
-| Max LLM calls per query budget | `2` |
-| Chunk size | `1000` characters |
-| Chunk overlap | `200` characters |
-| Supported formats | `.pdf`, `.txt`, `.md` |
-| Vector store | `FAISS` |
 | Embedding model | `models/text-embedding-004` |
 | Embedding dimension | `768` |
+| Target LLM calls per query | `1` |
+| Max LLM calls budget | `2` |
+| Chunk size | `1000` characters |
+| Chunk overlap | `200` characters |
 | Max documents | `100` |
 | Max synthesis input papers | `8` |
 | Max synthesis output tokens | `6000` |
 | Synthesis temperature | `0.3` |
+| Max full-text chars per paper | `30,000` |
+| Supported file formats | `.pdf`, `.txt`, `.md` |
+| Max file size | `50 MB` |
+
+---
 
 ## Supported Research Domains
 
-Domain classification is deterministic keyword scoring, not an LLM call.
+Domain classification is purely deterministic keyword scoring — no LLM call.
 
-- `machine_learning`
-- `computer_vision`
-- `natural_language`
-- `robotics`
-- `cybersecurity`
-- `software_engineering`
-- `other`
+| Domain | Key terms |
+|---|---|
+| `machine_learning` | neural, training, deep learning, classification, optimization |
+| `computer_vision` | image, detection, segmentation, convolutional, vision |
+| `natural_language` | transformer, attention, tokenization, embedding, sentiment |
+| `robotics` | navigation, manipulation, kinematics, motion planning |
+| `cybersecurity` | encryption, vulnerability, threat, cryptography |
+| `software_engineering` | architecture, design patterns, agile, devops, testing |
+| `other` | fallback for unmatched queries |
 
-## Cost Behavior
+---
 
-The app tracks Gemini token usage through API metadata and calculates cost using the pricing table in `config/settings.py`. Document processing and retrieval do not use synthesis LLM calls, but embeddings do use the Google embeddings API.
+## Synthesis Output Structure
 
-Typical research questions are intended to stay very low cost because only the final synthesis step uses the LLM.
+Each `/ask` response returns a `synthesis` object with the following fields under `research_synthesis`:
 
-## Deployment On Streamlit Cloud
+| Field | Description |
+|---|---|
+| `key_findings` | Core technical discoveries with `[Paper N]` citation labels |
+| `research_gaps` | Areas identified as needing further investigation |
+| `methodology_insights` | Research method observations across papers |
+| `technical_contributions` | Specific algorithmic innovations |
+| `comparative_analysis` | Cross-paper comparisons |
+| `practical_implications` | Real-world applications |
+| `performance_metrics` | Quantitative results (accuracy, F1, baselines) |
+| `confidence` | Retrieval confidence score `[0.0 – 1.0]` |
+| `recommended_papers` | Ranked list of most relevant documents |
 
-1. Push the repository to GitHub.
-2. Create a Streamlit Cloud app from the repo.
-3. Set the main file to:
-
-```text
-streamlit_app.py
-```
-
-4. Add this secret in Streamlit Cloud:
-
-```toml
-GEMINI_API_KEY = "your-gemini-api-key"
-```
-
-5. Deploy.
+---
 
 ## Troubleshooting
 
-### `streamlit` command not found
-
-Run Streamlit through Python:
-
+**`streamlit` command not found**
 ```bash
 python -m streamlit run streamlit_app.py
 ```
 
-### Gemini API key error
+**Gemini API key error**
+- Confirm `.env` exists and contains `GEMINI_API_KEY`
+- On Streamlit Cloud: add the key under App Settings → Secrets
+- Regenerate at https://aistudio.google.com/app/apikey
 
-- Confirm `.env` exists locally.
-- Confirm `GEMINI_API_KEY` is set.
-- On Streamlit Cloud, confirm the key is configured in app secrets.
-- Regenerate or verify the key in Google AI Studio.
-
-### FAISS installation fails
-
-Install or upgrade the FAISS CPU package:
-
+**FAISS installation fails**
 ```bash
 pip install --upgrade faiss-cpu
 ```
 
-### Uploaded document fails to process
+**"No key findings in synthesis"**
+- This means the LLM returned empty fields — ask a fresh question after re-uploading
+- Check the **Raw JSON** tab to inspect the actual API response
+- Use the fallback: the system auto-extracts sentences deterministically when Gemini fails
 
-Check that:
+**Document fails to process**
+- Must be `.pdf`, `.txt`, or `.md`
+- Must not be password-protected or empty
+- Must be under 50 MB
+- Avoid special characters (`\ / : * ? " < > |`) in filenames
 
-- The file is PDF, TXT, or MD.
-- The file is not empty.
-- The file is not password-protected.
-- The filename avoids characters such as `\ / : * ? " < > |`.
+**Answer quality is low**
+- Upload documents that contain terms relevant to your question
+- Use the suggested questions — they are generated from your actual document content
+- Check the **Metrics** tab for retrieval confidence score
 
-### Microphone appears but does not type
-
-- Refresh the page after deployment.
-- Use Chrome or Edge.
-- Allow microphone permission in the browser prompt.
-- Make sure the page is served over HTTPS when deployed.
-
-### Answer is weak or fallback-like
-
-- Ask a question that uses terms present in the uploaded documents.
-- Upload more relevant documents.
-- Increase the max result slider before asking.
-- Check the Performance Metrics tab for confidence and retrieval details.
-
-## Development Commands
-
-Syntax check:
-
-```bash
-python -m py_compile streamlit_app.py
-```
-
-Run locally:
-
-```bash
-python -m streamlit run streamlit_app.py
-```
-
-Check git changes:
-
-```bash
-git status --short
-```
+---
 
 ## Requirements
 
 - Python 3.10+
-- Gemini API key
-- Internet connection for Gemini and embedding calls
-- Enough memory for in-session FAISS indexing
+- Google Gemini API key
+- Internet connection (for Gemini LLM and embedding API calls)
+- Sufficient RAM for FAISS in-session indexing (512 MB minimum recommended)
 
-# #   C I / C D   P i p e l i n e   A c t i v e  
- 
+---
+
+## License
+
+MIT
