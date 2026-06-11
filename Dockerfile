@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy entrypoint script
-COPY entrypoint.sh /app/
-RUN chmod +x /app/entrypoint.sh
+COPY entrypoint.sh /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh \
+    && chmod 755 /app/entrypoint.sh \
+    && ls -la /app/entrypoint.sh
 
 # Copy and install dependencies first (better caching)
 COPY requirements.txt .
@@ -26,4 +28,4 @@ EXPOSE 8501 8000
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
 # Run entrypoint script that starts both services
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]
