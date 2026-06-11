@@ -14,8 +14,4 @@ spec:
       port: 80
       targetPort: 8501
       nodePort: 30080
-    - name: api
-      protocol: TCP
-      port: 8000
-      targetPort: 8000
-      nodePort: 30081
+    
