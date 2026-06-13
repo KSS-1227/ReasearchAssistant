@@ -18,7 +18,7 @@ streamlit>=1.35.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
-# --- HTTP Client (for Streamlit → FastAPI communication) ---
+# --- HTTP Client (for Streamlit -> FastAPI communication) ---
 requests>=2.31.0
 
 # --- Data Handling ---
@@ -38,4 +38,9 @@ faiss-cpu>=1.8.0
 
 # --- PDF Parsing (used by LangChain PyPDFLoader) ---
 pypdf>=4.2.0
+
+# --- Testing ---
 pytest>=8.0.0
+
+# --- Supabase (Auth + Database + Storage) ---
+supabase>=2.0.0
