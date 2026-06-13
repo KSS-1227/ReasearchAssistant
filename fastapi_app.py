@@ -13,7 +13,6 @@ Endpoints:
   GET    /status                - System statistics and session info
   DELETE /reset                 - Clear session and vector index
 """
-
 import os
 import logging
 import uuid
@@ -25,8 +24,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
+try:
+    from supabase import create_client, Client as SupabaseClient
+    _supabase_available = True
+except ImportError:
+    _supabase_available = False
 
 from core.coordinator import ResearchCoordinator
 
@@ -38,6 +44,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+# Supabase client — optional, only initialised when env vars are present
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+supabase = (
+    create_client(SUPABASE_URL, SUPABASE_KEY)
+    if _supabase_available and SUPABASE_URL and SUPABASE_KEY
+    else None
+)
+
+security = HTTPBearer(auto_error=False)
 
 # ── Pydantic Models ───────────────────────────────────────────────────────
 
@@ -235,6 +252,25 @@ def get_session_manager() -> SessionManager:
     return session_manager
 
 
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Security(security)
+):
+    """Verify Supabase JWT token and return user."""
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+    
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="No authorization token provided")
+    
+    try:
+        user = supabase.auth.get_user(credentials.credentials)
+        if not user or not user.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user.user
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
@@ -245,6 +281,42 @@ async def health_check() -> HealthResponse:
         timestamp=datetime.now().isoformat(),
         api_ready=session_manager is not None,
     )
+
+
+@app.get("/history", tags=["Research"])
+async def get_history(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
+    """Get query history for authenticated user."""
+    if supabase is None:
+        raise HTTPException(status_code=503, detail="Supabase not configured")
+
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        user = supabase.auth.get_user(credentials.credentials)
+        if not user or not user.user:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        result = supabase.table("queries")\
+            .select("*")\
+            .eq("user_id", str(user.user.id))\
+            .order("created_at", desc=True)\
+            .limit(20)\
+            .execute()
+
+        return {
+            "user_id": str(user.user.id),
+            "queries": result.data,
+            "count": len(result.data)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"History fetch failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch history: {str(e)}")
 
 
 @app.get("/", tags=["Info"])
@@ -437,16 +509,30 @@ async def ask_question(
         logger.info(
             f"Session {req.session_id}: answered in {processing_time:.2f}s"
         )
+        # Save query to Supabase if configured
+        if supabase:
+            try:
+                supabase.table("queries").insert({
+                    "session_id": req.session_id,
+                    "user_id": None,  # no auth on this route
+                    "question": req.question,
+                    "synthesis": synthesis,
+                    "processing_time_seconds": round(processing_time, 2)
+                }).execute()
+                logger.info("Query saved to Supabase")
+            except Exception as e:
+                logger.warning(f"Failed to save query to Supabase: {e}")
 
+        perf = synthesis.get("performance_metrics", {}) if isinstance(synthesis, dict) else {}
         return AskResponse(
             session_id=req.session_id,
             question=req.question,
             synthesis=synthesis,
             processing_time_seconds=round(processing_time, 2),
-            matching_papers=result.get("matching_papers", 0),
-            confidence_score=result.get("confidence_score", 0.0),
-            llm_calls=result.get("llm_calls", 0),
-            total_cost=result.get("total_cost", 0.0),
+            matching_papers=perf.get("papers_analyzed", 0),
+            confidence_score=perf.get("retrieval_confidence", 0.0),
+            llm_calls=perf.get("total_llm_calls", 0),
+            total_cost=perf.get("estimated_cost", 0.0),
         )
 
     except HTTPException:
