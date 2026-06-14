@@ -1,14 +1,22 @@
 # Environment Variables Template
-# Copy this content to a file named ".env" in your project root
+# Copy this to .env in the project root and fill in your values.
+#
+#   cp env_template.txt .env
 
-# OpenAI API Configuration
-OPENAI_API_KEY=your-openai-api-key-here
+# ── Google Gemini (required) ──────────────────────────────────────────────
+GEMINI_API_KEY=your-gemini-api-key-here
 
-# Other environment variables can be added here
-# STREAMLIT_SERVER_PORT=8501
-# LOG_LEVEL=INFO
+# ── Supabase (required for auth + history) ───────────────────────────────
+# Project URL — found in Supabase dashboard → Settings → API
+SUPABASE_URL=https://your-project-id.supabase.co
 
-# Instructions:
-# 1. Create a file named ".env" (with the dot) in your project root
-# 2. Copy the content above and replace "your-openai-api-key-here" with your actual API key
-# 3. The dotenv library will automatically load these variables when you run the application
+# Anon/public key — safe to use client-side (row-level security enforced)
+SUPABASE_ANON_KEY=your-supabase-anon-key-here
+
+# Service role key — ONLY used server-side in fastapi_app.py, NEVER in Streamlit
+SUPABASE_SERVICE_KEY=your-supabase-service-role-key-here
+
+# ── API URLs (optional overrides) ────────────────────────────────────────
+API_BASE_URL=http://localhost:8000
+API_HOST=0.0.0.0
+API_PORT=8000

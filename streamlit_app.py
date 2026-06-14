@@ -1,6 +1,7 @@
 """
 Research Assistant AI — Streamlit UI
 Communicates with FastAPI backend at API_BASE_URL.
+Auth via Supabase (anon key, client-side only).
 """
 
 import streamlit as st
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_TIMEOUT = 300
 
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+
 st.set_page_config(
     page_title="Research Assistant AI",
     page_icon="📚",
@@ -28,13 +32,44 @@ st.markdown("""
 <style>
     .main { padding-top: 1rem; }
     .stTabs [data-baseweb="tab-list"] button { min-width: 150px; }
+    .auth-card {
+        max-width: 420px;
+        margin: 4rem auto;
+        padding: 2rem;
+        border-radius: 12px;
+        border: 1px solid #2a2a2a;
+        background: #1a1a1a;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session State ─────────────────────────────────────────────────────────
+# ── Supabase Client ────────────────────────────────────────────────────────
+
+def init_supabase_client():
+    """Initialise Supabase client using anon key only (safe for frontend)."""
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    except ImportError:
+        logger.error("supabase package not installed — run: pip install supabase")
+        return None
+    except Exception as e:
+        logger.error(f"Supabase init failed: {e}")
+        return None
+
+supabase = init_supabase_client()
+
+# ── Session State ──────────────────────────────────────────────────────────
 
 def init_session_state():
     defaults = {
+        # auth
+        "is_authenticated": False,
+        "access_token": None,
+        "user_email": None,
+        # research workflow
         "api_session_id": None,
         "vector_store_ready": False,
         "documents_info": {},
@@ -44,6 +79,7 @@ def init_session_state():
         "active_tab": 0,
         "selected_question": "",
         "ask_inner_tab": 0,
+        "suggestions": [],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -51,10 +87,222 @@ def init_session_state():
 
 init_session_state()
 
-# ── API Helpers ───────────────────────────────────────────────────────────
+# ── Auth Helpers ───────────────────────────────────────────────────────────
+
+def logout():
+    """Sign out from Supabase and clear all auth + research state."""
+    if supabase and st.session_state.access_token:
+        try:
+            supabase.auth.sign_out()
+        except Exception as e:
+            logger.warning(f"Supabase sign_out error (ignoring): {e}")
+
+    for key in [
+        "is_authenticated", "access_token", "user_email",
+        "api_session_id", "vector_store_ready", "documents_info",
+        "last_answer", "api_healthy", "api_checked_at",
+        "active_tab", "selected_question", "ask_inner_tab", "suggestions",
+    ]:
+        default_map = {
+            "is_authenticated": False,
+            "vector_store_ready": False,
+            "documents_info": {},
+            "active_tab": 0,
+            "ask_inner_tab": 0,
+            "suggestions": [],
+            "selected_question": "",
+        }
+        st.session_state[key] = default_map.get(key, None)
+
+def _auth_headers() -> Dict[str, str]:
+    """Return Authorization header if a token is present."""
+    token = st.session_state.access_token
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+# ── Auth UI ────────────────────────────────────────────────────────────────
+
+def render_login_form():
+    """Email + password login form."""
+    st.subheader("Login")
+    email = st.text_input("Email", key="login_email", placeholder="you@example.com")
+    password = st.text_input("Password", type="password", key="login_password")
+
+    if st.button("Login", type="primary", use_container_width=True, key="login_btn"):
+        if not email.strip() or not password:
+            st.error("Please enter email and password.")
+            return
+        if supabase is None:
+            st.error("Cannot connect to authentication service. Check SUPABASE_URL and SUPABASE_ANON_KEY.")
+            return
+        try:
+            with st.spinner("Signing in..."):
+                resp = supabase.auth.sign_in_with_password(
+                    {"email": email.strip(), "password": password}
+                )
+            if resp.user and resp.session:
+                st.session_state.is_authenticated = True
+                st.session_state.access_token = resp.session.access_token
+                st.session_state.user_email = resp.user.email
+                st.rerun()
+            else:
+                st.error("Login failed. Please check your credentials.")
+        except Exception as e:
+            msg = str(e).lower()
+            if "invalid" in msg or "credentials" in msg or "password" in msg:
+                st.error("Invalid email or password.")
+            elif "not confirmed" in msg or "email" in msg and "confirm" in msg:
+                st.warning("Please confirm your email before logging in.")
+            elif "network" in msg or "connection" in msg:
+                st.error("Cannot connect to authentication service.")
+            else:
+                st.error(f"Login error: {e}")
+
+
+def render_signup_form():
+    """Email + password sign-up form with validation."""
+    st.subheader("Create Account")
+    email = st.text_input("Email", key="signup_email", placeholder="you@example.com")
+    password = st.text_input("Password", type="password", key="signup_password",
+                              help="Minimum 6 characters")
+    confirm = st.text_input("Confirm Password", type="password", key="signup_confirm")
+
+    if st.button("Sign Up", type="primary", use_container_width=True, key="signup_btn"):
+        if not email.strip() or not password or not confirm:
+            st.error("All fields are required.")
+            return
+        if len(password) < 6:
+            st.error("Password must be at least 6 characters.")
+            return
+        if password != confirm:
+            st.error("Passwords do not match.")
+            return
+        if supabase is None:
+            st.error("Cannot connect to authentication service. Check SUPABASE_URL and SUPABASE_ANON_KEY.")
+            return
+        try:
+            with st.spinner("Creating account..."):
+                resp = supabase.auth.sign_up(
+                    {"email": email.strip(), "password": password}
+                )
+            if resp.user:
+                # If email confirmation is enabled, session will be None
+                if resp.session:
+                    st.session_state.is_authenticated = True
+                    st.session_state.access_token = resp.session.access_token
+                    st.session_state.user_email = resp.user.email
+                    st.rerun()
+                else:
+                    st.success("Account created! Check your email to confirm before logging in.")
+            else:
+                st.error("Sign up failed. Please try again.")
+        except Exception as e:
+            msg = str(e).lower()
+            if "already registered" in msg or "already exists" in msg:
+                st.error("An account with this email already exists. Please log in.")
+            elif "network" in msg or "connection" in msg:
+                st.error("Cannot connect to authentication service.")
+            elif "password" in msg:
+                st.error(f"Password error: {e}")
+            else:
+                st.error(f"Sign up error: {e}")
+
+
+def render_login_page():
+    """Centered login/signup card shown when not authenticated."""
+    _, center, _ = st.columns([1, 1.2, 1])
+    with center:
+        st.markdown("## 📚 Research Assistant AI")
+        st.markdown("Citation-aware research synthesis powered by Gemini")
+        st.divider()
+
+        tab_login, tab_signup = st.tabs(["Login", "Sign Up"])
+        with tab_login:
+            render_login_form()
+        with tab_signup:
+            render_signup_form()
+
+        if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+            st.warning(
+                "⚠️ SUPABASE_URL or SUPABASE_ANON_KEY not set. "
+                "Auth is disabled — set these in your .env file."
+            )
+
+# ── History Tab ────────────────────────────────────────────────────────────
+
+def render_history_tab():
+    """Fetch and display past queries from the /history endpoint."""
+    st.header("📜 Query History")
+
+    if not st.session_state.access_token:
+        st.warning("Not authenticated.")
+        return
+
+    try:
+        with st.spinner("Loading history..."):
+            resp = requests.get(
+                f"{API_BASE_URL}/history",
+                headers=_auth_headers(),
+                timeout=15,
+            )
+
+        if resp.status_code == 401:
+            st.error("Session expired. Please log in again.")
+            logout()
+            st.rerun()
+            return
+
+        resp.raise_for_status()
+        data = resp.json()
+        queries = data.get("queries", [])
+
+    except requests.exceptions.ConnectionError:
+        st.error(f"Cannot connect to API at {API_BASE_URL}.")
+        return
+    except Exception as e:
+        st.error(f"Failed to load history: {e}")
+        return
+
+    if not queries:
+        st.info("No history yet. Ask your first research question to see it here.")
+        return
+
+    st.markdown(f"**{len(queries)} past queries**")
+
+    for i, entry in enumerate(queries):
+        question = entry.get("question", "Unknown question")
+        timestamp = entry.get("created_at", "")
+        if timestamp:
+            try:
+                ts = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                timestamp = ts.strftime("%d %b %Y, %H:%M")
+            except Exception:
+                pass
+
+        synthesis = entry.get("synthesis", {})
+        rs = synthesis.get("research_synthesis", synthesis) if isinstance(synthesis, dict) else {}
+        findings = rs.get("key_findings", []) if isinstance(rs, dict) else []
+
+        def extract_text(item):
+            return item.get("text", str(item)) if isinstance(item, dict) else str(item)
+
+        with st.expander(f"**{question[:80]}{'...' if len(question) > 80 else ''}** — {timestamp}", expanded=False):
+            st.markdown(f"**Question:** {question}")
+            if timestamp:
+                st.caption(f"Asked: {timestamp}")
+
+            if findings:
+                st.markdown("**Key Findings:**")
+                for finding in findings[:3]:
+                    st.write(f"• {extract_text(finding)}")
+
+            with st.expander("View Full Synthesis JSON"):
+                st.json(synthesis if synthesis else {"message": "No synthesis data stored."})
+
+# ── API Helpers ────────────────────────────────────────────────────────────
 
 def health_check() -> bool:
-    """Check FastAPI health — cached for 10 seconds to avoid hammering API"""
     now = datetime.now()
     if (
         st.session_state.api_checked_at is not None
@@ -62,13 +310,11 @@ def health_check() -> bool:
         and st.session_state.api_healthy is not None
     ):
         return st.session_state.api_healthy
-
     try:
         response = requests.get(f"{API_BASE_URL}/health", timeout=5)
         result = response.status_code == 200
     except Exception:
         result = False
-
     st.session_state.api_healthy = result
     st.session_state.api_checked_at = now
     return result
@@ -84,7 +330,7 @@ def upload_documents(uploaded_files: list) -> Optional[Dict[str, Any]]:
             response = requests.post(
                 f"{API_BASE_URL}/upload",
                 files=files,
-                timeout=API_TIMEOUT
+                timeout=API_TIMEOUT,
             )
             response.raise_for_status()
             data = response.json()
@@ -120,7 +366,7 @@ def process_documents() -> Optional[Dict[str, Any]]:
             response = requests.post(
                 f"{API_BASE_URL}/process",
                 json={"session_id": st.session_state.api_session_id},
-                timeout=API_TIMEOUT
+                timeout=API_TIMEOUT,
             )
             response.raise_for_status()
             data = response.json()
@@ -154,12 +400,11 @@ def ask_question(question: str, domain: Optional[str] = None) -> Optional[Dict[s
         }
         if domain:
             payload["domain"] = domain
-
         with st.spinner("Generating synthesis..."):
             response = requests.post(
                 f"{API_BASE_URL}/ask",
                 json=payload,
-                timeout=API_TIMEOUT
+                timeout=API_TIMEOUT,
             )
             response.raise_for_status()
             data = response.json()
@@ -187,7 +432,7 @@ def get_suggested_questions() -> Optional[Dict[str, Any]]:
             response = requests.get(
                 f"{API_BASE_URL}/suggested-questions",
                 params={"session_id": st.session_state.api_session_id},
-                timeout=API_TIMEOUT
+                timeout=API_TIMEOUT,
             )
             response.raise_for_status()
             return response.json()
@@ -204,23 +449,24 @@ def reset_session() -> bool:
         requests.delete(
             f"{API_BASE_URL}/reset",
             params={"session_id": st.session_state.api_session_id},
-            timeout=10
+            timeout=10,
         )
     except Exception as e:
         logger.warning(f"Reset API call failed (ignoring): {e}")
-    # Always clear local state regardless of API response
-    for key in ["api_session_id", "vector_store_ready", "documents_info", "last_answer", "active_tab", "selected_question", "suggestions", "ask_inner_tab"]:
-        st.session_state[key] = None if key == "api_session_id" else (
-            False if key == "vector_store_ready" else (
-                {} if key == "documents_info" else (
-                    0 if key in ("active_tab", "ask_inner_tab") else (
-                        [] if key == "suggestions" else (
-                            "" if key == "selected_question" else None
-                        )
-                    )
-                )
-            )
-        )
+    for key in [
+        "api_session_id", "vector_store_ready", "documents_info",
+        "last_answer", "active_tab", "selected_question",
+        "suggestions", "ask_inner_tab",
+    ]:
+        default_map = {
+            "vector_store_ready": False,
+            "documents_info": {},
+            "active_tab": 0,
+            "ask_inner_tab": 0,
+            "suggestions": [],
+            "selected_question": "",
+        }
+        st.session_state[key] = default_map.get(key, None)
     return True
 
 
@@ -232,8 +478,7 @@ def get_system_status() -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-
-# ── UI Components ─────────────────────────────────────────────────────────
+# ── UI Components ──────────────────────────────────────────────────────────
 
 def render_header():
     col1, col2 = st.columns([3, 1])
@@ -249,19 +494,23 @@ def render_header():
 
 def render_sidebar():
     with st.sidebar:
+        # ── User info + logout ──
+        st.markdown(f"👤 **{st.session_state.user_email or 'User'}**")
+        if st.button("🚪 Logout", use_container_width=True, key="logout_btn"):
+            logout()
+            st.rerun()
+
+        st.divider()
         st.header("📋 Session Info")
 
         if st.session_state.api_session_id:
             st.info(f"**Session:** `{st.session_state.api_session_id}`")
-
             info = st.session_state.documents_info
             if info:
                 st.markdown(f"**Files:** {info.get('count', 0)}")
                 st.markdown(f"**Size:** {info.get('size_mb', 0):.2f} MB")
-
             if st.session_state.vector_store_ready:
                 st.success("✅ Vector store ready")
-
             if st.button("🔄 New Session", use_container_width=True):
                 reset_session()
                 st.rerun()
@@ -298,7 +547,7 @@ def render_upload_tab():
         "Choose research documents",
         type=["pdf", "txt", "md"],
         accept_multiple_files=True,
-        key="file_uploader"
+        key="file_uploader",
     )
 
     col1, col2 = st.columns(2)
@@ -309,7 +558,7 @@ def render_upload_tab():
                 if result:
                     if result.get("unsupported_files"):
                         st.warning(f"Skipped: {result['unsupported_files']}")
-                    st.session_state.active_tab = 1  # auto-switch to Process tab
+                    st.session_state.active_tab = 1
                     st.rerun()
             else:
                 st.warning("Please select at least one file")
@@ -347,7 +596,7 @@ def render_process_tab():
                 "documents_processed": result["documents_processed"],
                 "time_seconds": result["processing_time_seconds"],
             })
-            st.session_state.active_tab = 2  # jump to Ask tab
+            st.session_state.active_tab = 2
             st.rerun()
 
 
@@ -358,7 +607,6 @@ def render_ask_tab():
         st.warning("⬅️ Process documents first (Step 2)")
         return
 
-    # Inner tab toggle buttons
     col1, col2 = st.columns(2)
     with col1:
         if st.button(
@@ -404,7 +652,6 @@ def render_ask_tab():
                     render_answer(result, key_suffix="current")
             else:
                 st.warning("Please enter a question")
-
     else:
         if st.button("🔄 Generate Suggestions", use_container_width=True):
             suggestions = get_suggested_questions()
@@ -417,12 +664,11 @@ def render_ask_tab():
             for idx, q in enumerate(suggestions):
                 if st.button(f"▶ {q}", key=f"sug_{idx}", use_container_width=True):
                     st.session_state.selected_question = q
-                    st.session_state.ask_inner_tab = 0  # switch to Custom Question
+                    st.session_state.ask_inner_tab = 0
                     st.rerun()
         else:
             st.info("Click 'Generate Suggestions' to get question ideas from your documents.")
 
-    # Show previous answer
     if st.session_state.last_answer:
         st.divider()
         st.subheader("📖 Previous Result")
@@ -430,7 +676,6 @@ def render_ask_tab():
 
 
 def render_answer(result: Dict[str, Any], key_suffix: str = ""):
-    """Render research answer with metrics and synthesis tabs."""
     st.divider()
     st.subheader("📖 Research Synthesis")
 
@@ -441,15 +686,13 @@ def render_answer(result: Dict[str, Any], key_suffix: str = ""):
         q = result.get("question", "")
         st.metric("Question", (q[:40] + "...") if len(q) > 40 else q)
 
-    # The API wraps everything under result["synthesis"]["research_synthesis"]
     raw = result.get("synthesis", {})
-    synthesis = raw.get("research_synthesis", raw)  # fallback to raw if flat
+    synthesis = raw.get("research_synthesis", raw) if isinstance(raw, dict) else {}
 
     if not synthesis:
         st.warning("No synthesis returned")
         return
 
-    # key_findings may be list of dicts {text, source} or plain strings
     def extract_text(item):
         return item.get("text", str(item)) if isinstance(item, dict) else str(item)
 
@@ -482,18 +725,22 @@ def render_answer(result: Dict[str, Any], key_suffix: str = ""):
         key=f"download_btn_{key_suffix}",
     )
 
-
-# ── Main ──────────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
+    # ── Auth gate ──
+    if not st.session_state.is_authenticated:
+        render_login_page()
+        return
+
     render_header()
     render_sidebar()
 
     active = st.session_state.active_tab
 
-    # Step progress indicator
-    cols = st.columns(3)
-    steps = [("📤 Upload", 0), ("⚙️ Process", 1), ("❓ Ask", 2)]
+    # Step progress indicator (Upload=0, Process=1, Ask=2, History=3)
+    cols = st.columns(4)
+    steps = [("📤 Upload", 0), ("⚙️ Process", 1), ("❓ Ask", 2), ("📜 History", 3)]
     for col, (label, idx) in zip(cols, steps):
         with col:
             if idx == active:
@@ -502,6 +749,10 @@ def main():
                 st.info(f"✅ {label}")
             else:
                 st.warning(f"○ {label}")
+            # Clicking the progress indicator also switches tabs
+            if st.button(label, key=f"nav_{idx}", use_container_width=True):
+                st.session_state.active_tab = idx
+                st.rerun()
 
     st.divider()
 
@@ -511,6 +762,8 @@ def main():
         render_process_tab()
     elif active == 2:
         render_ask_tab()
+    elif active == 3:
+        render_history_tab()
 
 
 if __name__ == "__main__":
