@@ -3,6 +3,8 @@
 A production-grade, citation-aware research synthesis system built on a **FastAPI + Streamlit** architecture with a deterministic 3-agent RAG pipeline powered by Google Gemini.
 
 > Live demo: https://reasearchassistant.streamlit.app/
+>
+> Backend (deployed): https://reasearchassistant.onrender.com/
 
 ---
 

@@ -48,11 +48,17 @@ load_dotenv()
 # Supabase client — optional, only initialised when env vars are present
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-supabase = (
-    create_client(SUPABASE_URL, SUPABASE_KEY)
-    if _supabase_available and SUPABASE_URL and SUPABASE_KEY
-    else None
-)
+
+supabase: Optional[Client] = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client initialized")
+    except Exception as e:
+        logger.warning(f"Supabase initialization failed: {e}")
+        supabase = None
+else:
+    logger.info("Supabase not configured — running without auth/history")
 
 security = HTTPBearer(auto_error=False)
 
