@@ -23,6 +23,8 @@ API_TIMEOUT = 300
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+st.write(f"DEBUG - SUPABASE_URL: '{SUPABASE_URL}'")
+st.write(f"DEBUG - ANON_KEY length: {len(SUPABASE_ANON_KEY)}")
 
 st.set_page_config(
     page_title="Research Assistant AI",
@@ -35,20 +37,42 @@ st.markdown("""
 <style>
     .main { padding-top: 1rem; }
 
-    /* Remove red "Press Enter to apply" border on text inputs */
-    .stTextInput > div > div > input:focus {
-        border-color: #4a4a4a !important;
+    /* ── Kill the red border + Press Enter tooltip on ALL text inputs ── */
+    div[data-baseweb="input"] {
+        border-color: #3a3a3a !important;
         box-shadow: none !important;
     }
-    .stTextInput > div[data-baseweb="input"] {
-        border-color: #4a4a4a !important;
+    div[data-baseweb="input"]:focus-within {
+        border-color: #555 !important;
+        box-shadow: none !important;
     }
-    /* Hide the "Press Enter to apply" tooltip entirely */
-    .stTextInput > div > div[data-testid="InputInstructions"] {
+    /* The red warning state Streamlit adds */
+    div[data-baseweb="input"][aria-invalid="true"],
+    div[data-baseweb="input"].st-emotion-cache-ue6h4q {
+        border-color: #3a3a3a !important;
+    }
+    /* Hide "Press Enter to apply" instruction text */
+    small.st-emotion-cache-1gulkj5,
+    div[data-testid="InputInstructions"],
+    [data-testid="InputInstructions"] {
         display: none !important;
     }
 
-    /* Auth card — centered, constrained width, subtle border */
+    /* ── Auth button — replace aggressive red with professional blue ── */
+    .stButton > button[kind="primary"] {
+        background-color: #2563eb !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.3px !important;
+        transition: background-color 0.2s ease !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #1d4ed8 !important;
+        border: none !important;
+    }
+
+    /* ── Auth card ── */
     .auth-card {
         max-width: 420px;
         margin: 2rem auto;
@@ -56,19 +80,6 @@ st.markdown("""
         border-radius: 12px;
         border: 1px solid #2e2e2e;
         background: #161616;
-    }
-
-    /* Slightly softer primary button color (less aggressive red) */
-    .stButton > button[kind="primary"] {
-        background-color: #2563eb;
-        border: none;
-        border-radius: 8px;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-    }
-    .stButton > button[kind="primary"]:hover {
-        background-color: #1d4ed8;
-        border: none;
     }
 </style>
 """, unsafe_allow_html=True)
