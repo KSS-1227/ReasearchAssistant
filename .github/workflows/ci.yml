@@ -37,6 +37,7 @@ jobs:
             -e GEMINI_API_KEY=test-key \
             research-assistant:${{ github.sha }}
 
+
           # Wait for FastAPI health endpoint (up to 60s)
           echo "Waiting for FastAPI to be ready..."
           for i in $(seq 1 30); do
@@ -48,12 +49,16 @@ jobs:
             sleep 2
           done
 
+          # ✅ Always dump logs for debugging
+          echo "=== Container logs ==="
+          docker logs test-container
+          echo "======================="
+
           # Verify FastAPI is healthy
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health)
           echo "FastAPI health status: $STATUS"
           if [ "$STATUS" != "200" ]; then
             echo "❌ FastAPI health check failed"
-            docker logs test-container
             exit 1
           fi
 
