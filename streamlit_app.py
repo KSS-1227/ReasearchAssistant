@@ -8,6 +8,9 @@ import streamlit as st
 import requests
 import json
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
