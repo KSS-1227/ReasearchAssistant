@@ -34,14 +34,41 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main { padding-top: 1rem; }
-    .stTabs [data-baseweb="tab-list"] button { min-width: 150px; }
+
+    /* Remove red "Press Enter to apply" border on text inputs */
+    .stTextInput > div > div > input:focus {
+        border-color: #4a4a4a !important;
+        box-shadow: none !important;
+    }
+    .stTextInput > div[data-baseweb="input"] {
+        border-color: #4a4a4a !important;
+    }
+    /* Hide the "Press Enter to apply" tooltip entirely */
+    .stTextInput > div > div[data-testid="InputInstructions"] {
+        display: none !important;
+    }
+
+    /* Auth card — centered, constrained width, subtle border */
     .auth-card {
         max-width: 420px;
-        margin: 4rem auto;
-        padding: 2rem;
+        margin: 2rem auto;
+        padding: 2rem 2.5rem;
         border-radius: 12px;
-        border: 1px solid #2a2a2a;
-        background: #1a1a1a;
+        border: 1px solid #2e2e2e;
+        background: #161616;
+    }
+
+    /* Slightly softer primary button color (less aggressive red) */
+    .stButton > button[kind="primary"] {
+        background-color: #2563eb;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #1d4ed8;
+        border: none;
     }
 </style>
 """, unsafe_allow_html=True)
