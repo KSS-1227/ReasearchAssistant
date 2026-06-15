@@ -16,13 +16,16 @@ Endpoints:
 import os
 import logging
 import uuid
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from pathlib import Path
 import tempfile
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, BackgroundTasks, Security
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, BackgroundTasks, Security, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
@@ -242,6 +245,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+# Rate limiter setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -342,7 +349,9 @@ async def root():
 
 
 @app.post("/upload", response_model=UploadResponse, tags=["Documents"])
+@limiter.limit("5/minute")
 async def upload_documents(
+    request: Request,
     files: List[UploadFile] = File(...),
     sm: SessionManager = Depends(get_session_manager),
 ) -> UploadResponse:
@@ -478,13 +487,14 @@ async def process_documents(
 
 
 @app.post("/ask", response_model=AskResponse, tags=["Research"])
+@limiter.limit("10/minute")
 async def ask_question(
+    request: Request,
     req: AskRequest,
     sm: SessionManager = Depends(get_session_manager),
 ) -> AskResponse:
     """Ask a research question. Returns structured synthesis."""
     session = sm.get_session(req.session_id)
-
     if not session.vector_store_ready:
         raise HTTPException(
             status_code=400,
