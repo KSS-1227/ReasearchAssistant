@@ -43,6 +43,6 @@ pypdf>=4.2.0
 pytest>=8.0.0
 
 # --- Supabase (Auth + Database + Storage) ---
-supabase>=2.0.0s
+supabase>=2.0.0
 
 slowapi>=0.1.9
