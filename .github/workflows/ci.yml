@@ -32,7 +32,6 @@ jobs:
         run: |
           docker run -d \
             --name test-container \
-            -p 8501:8501 \
             -p 8000:8000 \
             -e GEMINI_API_KEY=test-key \
             research-assistant:${{ github.sha }}
