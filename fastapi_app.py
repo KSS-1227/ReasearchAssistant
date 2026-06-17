@@ -644,27 +644,34 @@ async def get_suggested_questions(
                 if len(questions) >= 5:
                     break
 
-                # Extract clean text from doc regardless of type
-                if hasattr(doc, "page_content"):
-                    text = doc.page_content
-                elif isinstance(doc, dict):
-                    text = doc.get("page_content") or doc.get("content", "")
-                elif isinstance(doc, str):
-                    text = doc
-                else:
-                    text = str(doc)
-
-                # Extract title/source from metadata if available
-                source = ""
-                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+                # All results are plain dicts from document_processor.search_documents()
+                # Keys: 'content', 'metadata', 'source_file', 'similarity_score'
+                if isinstance(doc, dict):
+                    text = doc.get("content", "") or doc.get("page_content", "")
+                    metadata = doc.get("metadata", {})
                     source = (
-                        doc.metadata.get("title")
-                        or doc.metadata.get("source")
-                        or doc.metadata.get("file_name", "")
+                        doc.get("source_file")
+                        or (metadata.get("source_file") if isinstance(metadata, dict) else None)
+                        or (metadata.get("original_filename") if isinstance(metadata, dict) else None)
+                        or ""
                     )
-                    # Strip file extension and path for cleaner display
-                    if source:
-                        source = os.path.splitext(os.path.basename(source))[0].strip()
+                elif hasattr(doc, "page_content"):
+                    # LangChain Document object fallback
+                    text = doc.page_content
+                    source = (
+                        doc.metadata.get("source_file") or
+                        doc.metadata.get("original_filename", "")
+                        if isinstance(getattr(doc, "metadata", None), dict) else ""
+                    )
+                else:
+                    continue
+
+                if not text or not text.strip():
+                    continue
+
+                # Strip file extension for clean display
+                if source:
+                    source = os.path.splitext(os.path.basename(source))[0].strip()
 
                 text_lower = text.lower()
 
