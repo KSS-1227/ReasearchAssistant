@@ -1,9 +1,4 @@
 """
-FastAPI Backend for Research Assistant AI
-
-Exposes the research pipeline as REST endpoints.
-Reuses core/ and agents/ modules for document processing and synthesis.
-
 Endpoints:
   POST   /upload                - Upload research documents (PDF, TXT, MD)
   POST   /process               - Build vector index from uploaded docs
@@ -13,6 +8,7 @@ Endpoints:
   GET    /status                - System statistics and session info
   DELETE /reset                 - Clear session and vector index
 """
+import re
 import os
 import logging
 import uuid
@@ -94,6 +90,7 @@ class AskRequest(BaseModel):
     session_id: str
     question: str = Field(..., min_length=5, max_length=500)
     domain: Optional[str] = Field(None)
+    user_token: Optional[str] = Field(None, description="Supabase JWT token for history saving")
 
 
 class AskResponse(BaseModel):
@@ -125,6 +122,28 @@ class StatusResponse(BaseModel):
     total_documents_processed: int
     total_questions_asked: int
     system_uptime_seconds: float
+
+
+# ── Guardrails ────────────────────────────────────────────────────────────
+
+PROMPT_INJECTION_PATTERNS = [
+    r"ignore (all )?(previous|above|prior) instructions",
+    r"disregard (all )?(previous|above|prior)",
+    r"new instructions?:",
+    r"system prompt:",
+    r"you are now",
+    r"forget (everything|all) (above|before)",
+    r"act as if",
+    r"override your instructions",
+]
+
+def detect_prompt_injection(text: str) -> List[str]:
+    """Scan text for potential prompt injection patterns. Returns list of matches found."""
+    findings = []
+    for pattern in PROMPT_INJECTION_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            findings.append(pattern)
+    return findings
 
 
 # ── Session Management ────────────────────────────────────────────────────
@@ -449,10 +468,23 @@ async def process_documents(
             if not os.path.isfile(file_path):
                 continue
 
-            # ✅ Using actual coordinator method: process_document()
+           # ✅ Using actual coordinator method: process_document()
             result = session.coordinator.process_document(file_path)
             docs_processed += 1
             logger.info(f"Processed: {filename} → {result}")
+
+            # Guardrail: check for prompt injection patterns
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content_sample = f.read(5000)  # check first 5000 chars
+                injection_findings = detect_prompt_injection(content_sample)
+                if injection_findings:
+                    logger.warning(
+                        f"⚠️ Potential prompt injection in '{filename}': "
+                        f"{len(injection_findings)} pattern(s) matched"
+                    )
+            except Exception:
+                pass  # binary files (PDFs) can't be read as text directly — skip
 
         session.documents_processed = docs_processed
         session.vector_store_ready = True
@@ -494,15 +526,28 @@ async def ask_question(
     sm: SessionManager = Depends(get_session_manager),
 ) -> AskResponse:
     """Ask a research question. Returns structured synthesis."""
+
+    # Guardrail: check question FIRST before any session lookup
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    injection_findings = detect_prompt_injection(req.question)
+    if injection_findings:
+        logger.warning(
+            f"⚠️ Potential prompt injection in question: {req.question[:100]}"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Question contains disallowed content and cannot be processed."
+        )
+
     session = sm.get_session(req.session_id)
+
     if not session.vector_store_ready:
         raise HTTPException(
             status_code=400,
             detail="Vector store not ready. Run POST /process first."
         )
-
-    if not req.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     start_time = datetime.now()
 
@@ -525,19 +570,21 @@ async def ask_question(
         logger.info(
             f"Session {req.session_id}: answered in {processing_time:.2f}s"
         )
-        # Save query to Supabase if configured
-        if supabase:
+        # Save query to Supabase if token provided
+        if supabase and req.user_token:
             try:
-                supabase.table("queries").insert({
-                    "session_id": req.session_id,
-                    "user_id": None,  # no auth on this route
-                    "question": req.question,
-                    "synthesis": synthesis,
-                    "processing_time_seconds": round(processing_time, 2)
-                }).execute()
-                logger.info("Query saved to Supabase")
+                user_response = supabase.auth.get_user(req.user_token)
+                if user_response and user_response.user:
+                    user_id = str(user_response.user.id)
+                    supabase.table("queries").insert({
+                        "user_id": user_id,
+                        "question": req.question,
+                        "synthesis": synthesis,
+                        "processing_time_seconds": round(processing_time, 2)
+                    }).execute()
+                    logger.info(f"Query saved for user {user_id[:8]}...")
             except Exception as e:
-                logger.warning(f"Failed to save query to Supabase: {e}")
+                logger.warning(f"Failed to save query: {e}")
 
         perf = synthesis.get("performance_metrics", {}) if isinstance(synthesis, dict) else {}
         return AskResponse(

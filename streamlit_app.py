@@ -17,14 +17,23 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+from streamlit_cookies_manager import EncryptedCookieManager
+
+# ── Cookie Manager ────────────────────────────────────────────────────────
+# Must be initialised before set_page_config and any st calls
+cookies = EncryptedCookieManager(
+    prefix="research_assistant_",
+    password=os.getenv("COOKIE_SECRET", "research-assistant-cookie-secret-key")
+)
+if not cookies.ready():
+    st.stop()
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_TIMEOUT = 300
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-st.write(f"DEBUG - SUPABASE_URL: '{SUPABASE_URL}'")
-st.write(f"DEBUG - ANON_KEY length: {len(SUPABASE_ANON_KEY)}")
+
 
 st.set_page_config(
     page_title="Research Assistant AI",
@@ -37,7 +46,7 @@ st.markdown("""
 <style>
     .main { padding-top: 1rem; }
 
-    /* ── Kill the red border + Press Enter tooltip on ALL text inputs ── */
+    /* Kill red border and Press Enter tooltip on password/text inputs */
     div[data-baseweb="input"] {
         border-color: #3a3a3a !important;
         box-shadow: none !important;
@@ -46,40 +55,20 @@ st.markdown("""
         border-color: #555 !important;
         box-shadow: none !important;
     }
-    /* The red warning state Streamlit adds */
-    div[data-baseweb="input"][aria-invalid="true"],
-    div[data-baseweb="input"].st-emotion-cache-ue6h4q {
-        border-color: #3a3a3a !important;
-    }
-    /* Hide "Press Enter to apply" instruction text */
-    small.st-emotion-cache-1gulkj5,
-    div[data-testid="InputInstructions"],
-    [data-testid="InputInstructions"] {
+    [data-testid="InputInstructions"],
+    div[data-testid="InputInstructions"] {
         display: none !important;
     }
 
-    /* ── Auth button — replace aggressive red with professional blue ── */
+    /* Replace Streamlit's default red primary button with professional blue */
     .stButton > button[kind="primary"] {
         background-color: #2563eb !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        letter-spacing: 0.3px !important;
-        transition: background-color 0.2s ease !important;
     }
     .stButton > button[kind="primary"]:hover {
         background-color: #1d4ed8 !important;
-        border: none !important;
-    }
-
-    /* ── Auth card ── */
-    .auth-card {
-        max-width: 420px;
-        margin: 2rem auto;
-        padding: 2rem 2.5rem;
-        border-radius: 12px;
-        border: 1px solid #2e2e2e;
-        background: #161616;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -128,16 +117,41 @@ def init_session_state():
 
 init_session_state()
 
+
+def restore_from_cookies():
+    """Restore auth session from browser cookies on page refresh."""
+    token = cookies.get("access_token", "")
+    email = cookies.get("user_email", "")
+    if token and not st.session_state.get("is_authenticated"):
+        try:
+            if supabase:
+                user = supabase.auth.get_user(token)
+                if user and user.user:
+                    st.session_state.is_authenticated = True
+                    st.session_state.access_token = token
+                    st.session_state.user_email = email
+        except Exception:
+            # Token invalid or expired — clear cookies silently
+            cookies["access_token"] = ""
+            cookies["user_email"] = ""
+            cookies.save()
+
+restore_from_cookies()
+
 # ── Auth Helpers ───────────────────────────────────────────────────────────
 
 def logout():
-    """Sign out from Supabase and clear all auth + research state."""
+    """Sign out from Supabase, clear session state and cookies."""
     if supabase and st.session_state.access_token:
         try:
             supabase.auth.sign_out()
         except Exception as e:
             logger.warning(f"Supabase sign_out error (ignoring): {e}")
 
+    # Clear cookies
+    cookies["access_token"] = ""
+    cookies["user_email"] = ""
+    cookies.save()
     for key in [
         "is_authenticated", "access_token", "user_email",
         "api_session_id", "vector_store_ready", "documents_info",
@@ -186,6 +200,12 @@ def render_login_form():
                 st.session_state.is_authenticated = True
                 st.session_state.access_token = resp.session.access_token
                 st.session_state.user_email = resp.user.email
+                cookies["access_token"] = resp.session.access_token
+                cookies["user_email"] = resp.user.email
+                cookies.save()
+                with st.spinner("Loading your workspace..."):
+                    import time
+                    time.sleep(0.5)
                 st.rerun()
             else:
                 st.error("Login failed. Please check your credentials.")
@@ -347,7 +367,7 @@ def health_check() -> bool:
     now = datetime.now()
     if (
         st.session_state.api_checked_at is not None
-        and (now - st.session_state.api_checked_at).seconds < 10
+        and (now - st.session_state.api_checked_at).seconds < 30
         and st.session_state.api_healthy is not None
     ):
         return st.session_state.api_healthy
@@ -441,6 +461,8 @@ def ask_question(question: str, domain: Optional[str] = None) -> Optional[Dict[s
         }
         if domain:
             payload["domain"] = domain
+        if st.session_state.get("access_token"):
+            payload["user_token"] = st.session_state.access_token
         with st.spinner("Generating synthesis..."):
             response = requests.post(
                 f"{API_BASE_URL}/ask",
@@ -511,6 +533,7 @@ def reset_session() -> bool:
     return True
 
 
+@st.cache_data(ttl=30)
 def get_system_status() -> Optional[Dict[str, Any]]:
     try:
         response = requests.get(f"{API_BASE_URL}/status", timeout=5)
@@ -527,10 +550,7 @@ def render_header():
         st.title("📚 Research Assistant AI")
         st.markdown("Upload research documents, ask questions, get citation-aware synthesis")
     with col2:
-        if health_check():
-            st.success("✅ API Connected")
-        else:
-            st.error(f"❌ API Offline ({API_BASE_URL})")
+        st.caption(f"Backend: `{API_BASE_URL}`")
 
 
 def render_sidebar():
