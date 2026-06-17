@@ -3,6 +3,10 @@
 #
 #   cp env_template.txt .env
 
+# ── Cookie Encryption (required for session persistence) ────────────────────
+# Any random string — used to encrypt browser cookies
+COOKIE_SECRET=change-this-to-a-random-secret-string
+
 # ── Google Gemini (required) ──────────────────────────────────────────────
 GEMINI_API_KEY=your-gemini-api-key-here
 

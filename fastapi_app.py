@@ -620,36 +620,98 @@ async def get_suggested_questions(
         )
 
     try:
-        docs_response = session.coordinator.search_uploaded_documents("research methodology findings")
+        search_queries = [
+            "methodology approach algorithm",
+            "results accuracy performance",
+            "problem challenge limitation",
+            "future work extension proposal",
+            "key findings contributions",
+        ]
+
+        seen_questions: set = set()
         questions = []
-        results = []
-        if isinstance(docs_response, dict):
+
+        for query in search_queries:
+            if len(questions) >= 5:
+                break
+
+            docs_response = session.coordinator.search_uploaded_documents(query)
+            if not isinstance(docs_response, dict):
+                continue
             results = docs_response.get("results", [])
 
-        for doc in results[:5]:
-            title = None
-            preview = None
-            if hasattr(doc, "metadata") and isinstance(getattr(doc, "metadata"), dict):
-                title = doc.metadata.get("title") or doc.metadata.get("source")
-            if hasattr(doc, "page_content"):
-                preview = getattr(doc, "page_content").strip().replace("\n", " ")[:80]
-            elif isinstance(doc, str):
-                preview = doc.strip().replace("\n", " ")[:80]
-            else:
-                preview = str(doc).strip().replace("\n", " ")[:80]
+            for doc in results:
+                if len(questions) >= 5:
+                    break
 
-            if title:
-                questions.append(f"What are the key contributions of '{title}'?")
-            elif preview:
-                questions.append(f"What are the main insights from this excerpt: {preview}...")
+                # Extract clean text from doc regardless of type
+                if hasattr(doc, "page_content"):
+                    text = doc.page_content
+                elif isinstance(doc, dict):
+                    text = doc.get("page_content") or doc.get("content", "")
+                elif isinstance(doc, str):
+                    text = doc
+                else:
+                    text = str(doc)
 
+                # Extract title/source from metadata if available
+                source = ""
+                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+                    source = (
+                        doc.metadata.get("title")
+                        or doc.metadata.get("source")
+                        or doc.metadata.get("file_name", "")
+                    )
+                    # Strip file extension and path for cleaner display
+                    if source:
+                        source = os.path.splitext(os.path.basename(source))[0].strip()
+
+                text_lower = text.lower()
+
+                # Map chunk content to a meaningful research question
+                if any(w in text_lower for w in ["proposed", "method", "algorithm", "approach", "architecture"]):
+                    q = (
+                        f"What methodology or approach is proposed in '{source}'?"
+                        if source else
+                        "What methodology or algorithmic approach is proposed in these papers?"
+                    )
+                elif any(w in text_lower for w in ["result", "accuracy", "performance", "score", "%", "benchmark"]):
+                    q = (
+                        f"What performance results and benchmarks are reported in '{source}'?"
+                        if source else
+                        "What are the key performance results and benchmarks across these papers?"
+                    )
+                elif any(w in text_lower for w in ["problem", "challenge", "limitation", "drawback", "constraint"]):
+                    q = (
+                        f"What limitations and challenges does '{source}' identify?"
+                        if source else
+                        "What are the main limitations and challenges identified across these papers?"
+                    )
+                elif any(w in text_lower for w in ["future", "extend", "propose", "direction", "open problem"]):
+                    q = (
+                        f"What future research directions does '{source}' suggest?"
+                        if source else
+                        "What future research directions are suggested in these papers?"
+                    )
+                else:
+                    q = (
+                        f"What are the key concepts and contributions of '{source}'?"
+                        if source else
+                        "What are the key concepts and contributions across these papers?"
+                    )
+
+                if q not in seen_questions:
+                    seen_questions.add(q)
+                    questions.append(q)
+
+        # Fallback: diverse generic research questions if nothing useful found
         if not questions:
             questions = [
-                "What are the main contributions of these papers?",
-                "What methodologies are used across these studies?",
-                "What research gaps are identified?",
-                "How do the results compare across papers?",
-                "What are the practical implications?",
+                "What are the main research contributions of these papers?",
+                "What methodologies and algorithms are used across these studies?",
+                "What performance benchmarks and results are reported?",
+                "What limitations and research gaps are identified?",
+                "What future research directions are proposed?",
             ]
 
         logger.info(f"Generated {len(questions)} suggestions for session {session_id}")

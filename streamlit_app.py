@@ -550,7 +550,7 @@ def render_header():
         st.title("📚 Research Assistant AI")
         st.markdown("Upload research documents, ask questions, get citation-aware synthesis")
     with col2:
-        st.caption(f"Backend: `{API_BASE_URL}`")
+        pass
 
 
 def render_sidebar():
