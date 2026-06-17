@@ -550,7 +550,10 @@ def render_header():
         st.title("📚 Research Assistant AI")
         st.markdown("Upload research documents, ask questions, get citation-aware synthesis")
     with col2:
-        pass
+        st.markdown("<div style='padding-top: 1.4rem;'></div>", unsafe_allow_html=True)
+        if st.button("🚪 Sign Out", use_container_width=True, key="header_signout"):
+            logout()
+            st.rerun()
 
 
 def render_sidebar():
