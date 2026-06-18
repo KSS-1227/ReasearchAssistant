@@ -1,0 +1,118 @@
+    def _execute_pipeline(
+        self,
+        session_id: str,
+        query: str,
+        domain: ResearchDomain,
+        max_papers: int,
+    ) -> tuple:  # returns (result_dict, selected_k)
+        """
+        Run the 3-agent pipeline in strict order.
+
+        Step 1 — LiteratureScanner  (0 LLM calls)
+            Selects dynamic-k based on query complexity, fetches chunks
+            from FAISS, applies re-ranking, and groups into Paper objects.
+
+        Step 2 — CitationExtractor  (0 LLM calls)
+            Extracts citations, key quotes, and author metadata from the
+            Paper objects using regex patterns.
+
+        Step 3 — SynthesisAgent     (1 LLM call)
+            Builds a citation index ([Paper N] → title), constructs the
+            prompt with the SOURCE INDEX block, calls Gemini once, and
+            validates the JSON response.  Falls back to deterministic
+            sentence extraction if the LLM call fails.
+
+        After the pipeline:
+            compute_confidence() converts FAISS scores to a [0,1] score
+            that is attached to performance_metrics.
+        """
+
+        # ── Step 1: Literature Scanner ────────────────────────────────
+        logger.info("Step 1 | LiteratureScanner starting...")
+
+        scanner_result = self.literature_scanner.process({
+            "query":            query,
+            "domain":           domain.value,
+            "max_results":      max_papers,
+            "coordinator":      self,       # gives scanner access to FAISS store
+            "use_vector_store": True,       # prefer FAISS over raw PDF fallback
+        })
+
+        if not scanner_result.get("success"):
+            raise RuntimeError(
+                f"LiteratureScanner failed: {scanner_result.get('error')}"
+            )
+
+        papers_found = scanner_result["papers"]
+        if not papers_found:
+            raise RuntimeError("No relevant documents found for this query")
+
+        # Compute retrieval confidence from re-ranked relevance scores
+        # (combined_score = 0.7*similarity + 0.3*keyword_overlap)
+        retrieval_confidence = compute_confidence(
+            [p.relevance_score for p in papers_found]
+        )
+        logger.info(
+            "Step 1 done | papers=%d dynamic_k=%d reranked=%s confidence=%.4f",
+            len(papers_found),
+            scanner_result.get("effective_k", "?"),
+            scanner_result.get("reranked", False),
+            retrieval_confidence,
+        )
+
+        self.memory.update_session(session_id, papers_found=papers_found)
+
+        # ── Step 2: Citation Extractor ────────────────────────────────
+        logger.info("Step 2 | CitationExtractor starting...")
+
+        extraction_result = self.citation_extractor.process(papers_found)
+
+        if not extraction_result.get("success"):
+            raise RuntimeError(
+                f"CitationExtractor failed: {extraction_result.get('error')}"
+            )
+
+        logger.info(
+            "Step 2 done | citations=%d quotes=%d",
+            extraction_result["citations_extracted"],
+            extraction_result["quotes_extracted"],
+        )
+
+        # ── Step 3: Synthesis Agent ───────────────────────────────────
+        # Uses enhanced_papers (metadata-enriched) from the extractor.
+        # The agent internally builds the [Paper N] citation index and
+        # injects it into the prompt — exactly 1 LLM call happens here.
+        logger.info("Step 3 | SynthesisAgent starting (1 LLM call)...")
+
+        synthesis_result = self.synthesis_agent.process({
+            "query":          query,
+            "papers":         extraction_result["enhanced_papers"],
+            "extracted_data": extraction_result,
+        })
+
+        if not synthesis_result.get("success"):
+            raise RuntimeError(
+                f"SynthesisAgent failed: {synthesis_result.get('error')}"
+            )
+
+        synthesis = synthesis_result["synthesis"]
+        logger.info(
+            "Step 3 done | findings=%d confidence=%.2f fallback=%s",
+            len(synthesis.key_findings),
+            synthesis.confidence_score,
+            synthesis_result.get("fallback_used", False),
+        )
+
+        self.memory.update_session(session_id, synthesis=synthesis)
+
+        # ── Compile final result ──────────────────────────────────────
+        # Return selected_k alongside result so the caller can log it correctly
+        selected_k = scanner_result.get("effective_k", scanner_result.get("dynamic_k", 0))
+        return (
+            self._compile_result(
+                session_id, query, domain,
+                papers_found, extraction_result, synthesis_result,
+                retrieval_confidence,
+            ),
+            selected_k,
+        )

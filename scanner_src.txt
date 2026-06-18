@@ -1,0 +1,79 @@
+=== determine_k ===
+def determine_k(query: str) -> int:
+    """
+    Choose FAISS top-k based on query complexity (deterministic, 0 LLM calls).
+
+    Rules (checked in order):
+    1. Complex keyword present OR word count > 12  → k = 7
+    2. Medium keyword present  OR 7 ≤ words ≤ 12  → k = 5
+    3. Everything else                             → k = 3
+
+    Args:
+        query: Raw user query string.
+
+    Returns:
+        int: One of 3, 5, or 7.
+    """
+    q          = query.lower().strip()
+    word_count = len(q.split())
+
+    if any(kw in q for kw in _COMPLEX_KEYWORDS) or word_count > 12:
+        k, reason = _COMPLEX_K, "complex keyword or long query"
+    elif any(kw in q for kw in _MEDIUM_KEYWORDS) or 7 <= word_count <= 12:
+        k, reason = _MEDIUM_K, "medium keyword or medium-length query"
+    else:
+        k, reason = _SIMPLE_K, "simple/short query"
+
+    logger.info(
+        "determine_k | words=%d k=%d reason='%s' query='%.60s'",
+        word_count, k, reason, query,
+    )
+    return k
+
+
+=== _search_via_vector_store ===
+    def _search_via_vector_store(
+        self,
+        query: str,
+        coordinator: Any,
+        effective_k: int,
+        dynamic_k: int,
+    ) -> Dict[str, Any]:
+        """
+        Retrieve chunks from FAISS, re-rank them, then group into Paper objects.
+
+        The page-diversity filter in DocumentProcessor.search_documents() ensures
+        chunks are spread across the document rather than clustering on page 1-3.
+        Re-ranking then promotes chunks that are both semantically similar AND
+        contain the actual query keywords.
+        """
+        # Fetch chunks (page-diversity filter applied inside search_documents)
+        raw_chunks = coordinator.document_processor.search_documents(
+            query, k=effective_k
+        )
+
+        # Re-rank: combined_score = 0.7*similarity + 0.3*keyword_overlap
+        ranked_chunks = rerank_chunks(query, raw_chunks, top_n=effective_k)
+
+        if ranked_chunks:
+            logger.info(
+                "Re-rank complete | top_score=%.4f",
+                ranked_chunks[0]["combined_score"],
+            )
+
+        # Group chunks by source document to build Paper objects
+        papers = self._group_chunks_into_papers(ranked_chunks)
+
+        # Sort papers by their best chunk's combined_score (highest first)
+        papers.sort(key=lambda p: p.relevance_score, reverse=True)
+
+        return {
+            "success":       True,
+            "papers":        papers[:effective_k],
+            "search_method": "vector_store",
+            "total_papers":  len(papers),
+            "vector_store_used": True,
+            "reranked":      True,
+            "dynamic_k":     dynamic_k,
+            "effective_k":   effective_k,
+        }

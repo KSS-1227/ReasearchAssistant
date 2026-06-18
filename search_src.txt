@@ -1,0 +1,83 @@
+    def search_documents(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search documents using vector similarity - returns ALL relevant chunks with proper metadata.
+        
+        Args:
+            query: Search query
+            k: Number of results to return (increased to get more pages)
+            
+        Returns:
+            List of relevant document chunks with scores and metadata
+        """
+        if not self.vector_store:
+            logger.warning("Vector store not initialized")
+            return []
+        
+        if not query or len(query.strip()) == 0:
+            logger.warning("Empty search query provided")
+            return []
+        
+        try:
+            # Validate and sanitize k parameter
+            if not isinstance(k, int) or k <= 0:
+                k = 5
+
+            # Fetch k*3 candidates to give re-ranker enough material,
+            # but enforce page diversity so early pages don't dominate.
+            fetch_k = min(k * 3, 100)
+            raw_results = self.vector_store.similarity_search_with_score(query, k=fetch_k)
+
+            # --- Page diversity filter ---
+            # Allow at most 2 chunks per page so the result set spans
+            # the whole document rather than clustering on page 1-3.
+            page_chunk_count: dict = {}
+            diverse_results = []
+            for doc, score in raw_results:
+                page = doc.metadata.get('page', 0)
+                if page_chunk_count.get(page, 0) < 2:
+                    diverse_results.append((doc, score))
+                    page_chunk_count[page] = page_chunk_count.get(page, 0) + 1
+
+            # If diversity filter removed too many, fall back to raw results
+            results = diverse_results if len(diverse_results) >= k else raw_results
+
+            logger.info(
+                "search_documents | fetch_k=%d raw=%d after_diversity=%d pages_covered=%d",
+                fetch_k, len(raw_results), len(results), len(page_chunk_count)
+            )
+
+            # Format results with complete metadata.
+            # IMPORTANT: FAISS similarity_search_with_score returns L2 distances
+            # (lower = more similar). We store the raw distance as 'faiss_distance'
+            # AND a converted similarity in [0,1] as 'similarity_score' so all
+            # downstream consumers (rerank_chunks, compute_confidence) work with
+            # a consistent similarity convention where higher = more relevant.
+            formatted_results = []
+            seen_pages = set()
+
+            for doc, faiss_distance in results:
+                page_num   = doc.metadata.get('page', 'N/A')
+                heading    = doc.metadata.get('heading', 'N/A')
+                # Convert L2 distance to similarity: sim = 1 / (1 + distance)
+                # This maps [0, +inf) → (0, 1] without clamping
+                cosine_sim = 1.0 / (1.0 + float(faiss_distance))
+
+                formatted_results.append({
+                    'content':          doc.page_content,
+                    'metadata':         doc.metadata,
+                    'faiss_distance':   float(faiss_distance),   # raw L2 distance
+                    'similarity_score': cosine_sim,              # converted to [0,1]
+                    'source':           doc.metadata.get('source', 'Unknown'),
+                    'page':             page_num,
+                    'heading':          heading,
+                    'source_file':      doc.metadata.get('source_file', 'Unknown'),
+                })
+
+                seen_pages.add(page_num)
+            
+            logger.info("Retrieved %d chunks from %d pages", len(formatted_results), len(seen_pages))
+            return formatted_results
+            
+        except Exception as e:
+            logger.error("Document search failed: %s", e)
+            return []

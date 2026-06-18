@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Dynamic-k thresholds
-_SIMPLE_K  = 3   # short / simple queries
-_MEDIUM_K  = 5   # medium-length or descriptive queries
-_COMPLEX_K = 7   # long or analytical queries
+_SIMPLE_K  = 5   # short / simple queries
+_MEDIUM_K  = 8   # medium-length or descriptive queries
+_COMPLEX_K = 12   # long or analytical queries
 
 # Re-ranking weights (must sum to 1.0)
 _SIMILARITY_WEIGHT = 0.7   # FAISS cosine similarity contribution
