@@ -622,110 +622,101 @@ async def get_suggested_questions(
     try:
         search_queries = [
             "methodology approach algorithm",
-            "results accuracy performance",
-            "problem challenge limitation",
-            "future work extension proposal",
-            "key findings contributions",
+            "results accuracy performance evaluation",
+            "problem statement challenge limitation",
+            "future work extension proposed",
+            "key findings conclusion contribution"
         ]
 
         seen_questions: set = set()
         questions = []
 
-        for query in search_queries:
+        for search_query in search_queries:
             if len(questions) >= 5:
                 break
 
-            docs_response = session.coordinator.search_uploaded_documents(query)
-            if not isinstance(docs_response, dict):
+            try:
+                docs_response = session.coordinator.search_uploaded_documents(search_query)
+            except Exception:
                 continue
-            results = docs_response.get("results", [])
 
-            for doc in results:
+            # Handle both list and dict return shapes
+            chunks = []
+            if isinstance(docs_response, list):
+                chunks = docs_response
+            elif isinstance(docs_response, dict):
+                chunks = docs_response.get("results", []) or docs_response.get("documents", [])
+
+            for chunk in chunks[:2]:  # max 2 chunks per search query
                 if len(questions) >= 5:
                     break
 
-                # All results are plain dicts from document_processor.search_documents()
-                # Keys: 'content', 'metadata', 'source_file', 'similarity_score'
-                if isinstance(doc, dict):
-                    text = doc.get("content", "") or doc.get("page_content", "")
-                    metadata = doc.get("metadata", {})
-                    source = (
-                        doc.get("source_file")
-                        or (metadata.get("source_file") if isinstance(metadata, dict) else None)
-                        or (metadata.get("original_filename") if isinstance(metadata, dict) else None)
-                        or ""
-                    )
-                elif hasattr(doc, "page_content"):
-                    # LangChain Document object fallback
-                    text = doc.page_content
-                    source = (
-                        doc.metadata.get("source_file") or
-                        doc.metadata.get("original_filename", "")
-                        if isinstance(getattr(doc, "metadata", None), dict) else ""
-                    )
+                # Robust text extraction — handles dict, LangChain Document, or str
+                if isinstance(chunk, dict):
+                    text = chunk.get("content", "") or chunk.get("page_content", "")
+                elif hasattr(chunk, "page_content"):
+                    text = chunk.page_content
+                elif isinstance(chunk, str):
+                    text = chunk
                 else:
                     continue
 
-                if not text or not text.strip():
-                    continue
-
-                # Strip file extension for clean display
-                if source:
-                    source = os.path.splitext(os.path.basename(source))[0].strip()
-
+                text = text.replace("\n", " ").strip()
                 text_lower = text.lower()
 
-                # Map chunk content to a meaningful research question
-                if any(w in text_lower for w in ["proposed", "method", "algorithm", "approach", "architecture"]):
-                    q = (
-                        f"What methodology or approach is proposed in '{source}'?"
-                        if source else
-                        "What methodology or algorithmic approach is proposed in these papers?"
-                    )
-                elif any(w in text_lower for w in ["result", "accuracy", "performance", "score", "%", "benchmark"]):
-                    q = (
-                        f"What performance results and benchmarks are reported in '{source}'?"
-                        if source else
-                        "What are the key performance results and benchmarks across these papers?"
-                    )
-                elif any(w in text_lower for w in ["problem", "challenge", "limitation", "drawback", "constraint"]):
-                    q = (
-                        f"What limitations and challenges does '{source}' identify?"
-                        if source else
-                        "What are the main limitations and challenges identified across these papers?"
-                    )
-                elif any(w in text_lower for w in ["future", "extend", "propose", "direction", "open problem"]):
-                    q = (
-                        f"What future research directions does '{source}' suggest?"
-                        if source else
-                        "What future research directions are suggested in these papers?"
-                    )
+                if len(text) < 30:
+                    continue
+
+                question = None
+
+                if any(k in text_lower for k in ["propose", "method", "algorithm", "approach", "technique", "framework"]):
+                    question = "What methodology or technique is proposed in this research?"
+
+                elif any(k in text_lower for k in ["result", "accurac", "performance", "achiev", "outperform", "%", "score", "f1", "precision", "recall"]):
+                    question = "What performance results and metrics are reported in this research?"
+
+                elif any(k in text_lower for k in ["problem", "challeng", "limitation", "drawback", "issue", "difficult"]):
+                    question = "What are the key challenges and limitations identified in this study?"
+
+                elif any(k in text_lower for k in ["future", "extend", "improve", "recommend", "further"]):
+                    question = "What future research directions are suggested by the authors?"
+
+                elif any(k in text_lower for k in ["dataset", "data", "experiment", "train", "test", "evaluat"]):
+                    question = "What datasets and experimental setup were used in this research?"
+
+                elif any(k in text_lower for k in ["conclusion", "summary", "contribut", "finding", "novel"]):
+                    question = "What are the main contributions and conclusions of this research?"
+
                 else:
-                    q = (
-                        f"What are the key concepts and contributions of '{source}'?"
-                        if source else
-                        "What are the key concepts and contributions across these papers?"
-                    )
+                    sentences = text.split(".")
+                    first_sentence = sentences[0].strip() if sentences else ""
+                    if len(first_sentence) > 20:
+                        question = f"What does this research reveal about: {first_sentence[:60]}?"
 
-                if q not in seen_questions:
-                    seen_questions.add(q)
-                    questions.append(q)
+                if question and question not in seen_questions:
+                    seen_questions.add(question)
+                    questions.append(question)
 
-        # Fallback: diverse generic research questions if nothing useful found
-        if not questions:
-            questions = [
-                "What are the main research contributions of these papers?",
-                "What methodologies and algorithms are used across these studies?",
-                "What performance benchmarks and results are reported?",
-                "What limitations and research gaps are identified?",
-                "What future research directions are proposed?",
-            ]
+        # Fill remaining slots from fallback pool
+        fallback_questions = [
+            "What is the main research problem addressed in these papers?",
+            "What methodology was used to conduct this research?",
+            "What are the key experimental results and findings?",
+            "What are the limitations acknowledged by the authors?",
+            "What future research directions are recommended?",
+        ]
+        for q in fallback_questions:
+            if len(questions) >= 5:
+                break
+            if q not in seen_questions:
+                questions.append(q)
+                seen_questions.add(q)
 
-        logger.info(f"Generated {len(questions)} suggestions for session {session_id}")
+        logger.info(f"Generated {len(questions)} unique questions for session {session_id}")
 
         return SuggestedQuestionsResponse(
             session_id=session_id,
-            questions=questions,
+            questions=questions[:5],
             message=f"Generated {len(questions)} suggested questions.",
         )
 
