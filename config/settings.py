@@ -73,7 +73,7 @@ class SystemConfig:
         "max_documents": 100,
         "supported_formats": [".pdf", ".txt", ".md"],
         "vector_store_type": "FAISS",
-        "embedding_model": "models/text-embedding-004"  # Google Gemini embedding model
+        "embedding_model": "models/gemini-embedding-001"  # Google Gemini embedding model
     }
 
     # RAG pipeline constants (replaces magic numbers scattered across files)
