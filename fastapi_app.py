@@ -637,7 +637,8 @@ async def get_suggested_questions(
 
             try:
                 docs_response = session.coordinator.search_uploaded_documents(search_query)
-            except Exception:
+            except Exception as se:
+                logger.warning(f"Suggestions search failed for '{search_query}': {se}")
                 continue
 
             # Handle both list and dict return shapes
@@ -647,24 +648,38 @@ async def get_suggested_questions(
             elif isinstance(docs_response, dict):
                 chunks = docs_response.get("results", []) or docs_response.get("documents", [])
 
-            for chunk in chunks[:2]:  # max 2 chunks per search query
+            logger.info(f"Suggestions | query='{search_query}' chunks_returned={len(chunks)}")
+
+            # Log first chunk structure to diagnose type/key issues
+            if chunks:
+                first = chunks[0]
+                logger.info(
+                    f"Suggestions | chunk type={type(first).__name__} "
+                    f"keys={list(first.keys()) if isinstance(first, dict) else 'N/A'} "
+                    f"content_len={len(first.get('content', '') if isinstance(first, dict) else str(first))}"
+                )
+
+            for chunk in chunks[:3]:  # increased from 2 to 3 per query
                 if len(questions) >= 5:
                     break
 
                 # Robust text extraction — handles dict, LangChain Document, or str
                 if isinstance(chunk, dict):
-                    text = chunk.get("content", "") or chunk.get("page_content", "")
+                    text = chunk.get("content", "") or chunk.get("page_content", "") or chunk.get("text", "")
                 elif hasattr(chunk, "page_content"):
                     text = chunk.page_content
                 elif isinstance(chunk, str):
                     text = chunk
                 else:
+                    logger.warning(f"Suggestions | unknown chunk type: {type(chunk)}")
                     continue
 
                 text = text.replace("\n", " ").strip()
                 text_lower = text.lower()
 
-                if len(text) < 30:
+                logger.info(f"Suggestions | chunk text preview: {text[:80]}")
+
+                if len(text) < 20:  # lowered from 30 to catch shorter chunks
                     continue
 
                 question = None
@@ -692,6 +707,9 @@ async def get_suggested_questions(
                     first_sentence = sentences[0].strip() if sentences else ""
                     if len(first_sentence) > 20:
                         question = f"What does this research reveal about: {first_sentence[:60]}?"
+                    else:
+                        # Last resort — any non-empty chunk gets a generic research question
+                        question = "What are the key concepts discussed in this research?"
 
                 if question and question not in seen_questions:
                     seen_questions.add(question)
