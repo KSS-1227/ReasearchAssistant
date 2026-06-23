@@ -47,7 +47,7 @@ def make_llm_call_fn(coordinator):
     def llm_call_fn(prompt: str) -> str:
         response = coordinator.llm.make_call(
             messages=[{"role": "user", "content": prompt}],
-            json_mode={"type": "json_object"},
+            response_format={"type": "json_object"},
         )
         if response is None:
             raise RuntimeError("LLM call returned None")
@@ -63,10 +63,13 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-logfire.configure(
-    service_name="research-assistant-api",
-    service_version="1.0.0",
-)
+# Logfire observability — optional, only if token is set
+if os.getenv("LOGFIRE_TOKEN"):
+    logfire.configure(
+        service_name="research-assistant-api",
+        service_version="1.0.0",
+    )
+
 # Supabase client — optional, only initialised when env vars are present
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -288,8 +291,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-logfire.instrument_fastapi(app)
-logfire.instrument_httpx()   # auto-traces Firecrawl + Supabase HTTP calls
+if os.getenv("LOGFIRE_TOKEN"):
+    logfire.instrument_fastapi(app)
+    logfire.instrument_httpx()
+
 # Rate limiter setup
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
