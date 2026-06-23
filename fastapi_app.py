@@ -8,6 +8,7 @@ Endpoints:
   GET    /status                - System statistics and session info
   DELETE /reset                 - Clear session and vector index
 """
+import logfire
 import re
 import os
 import logging
@@ -19,6 +20,8 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from pathlib import Path
 import tempfile
+from core.coordinator import ResearchCoordinator
+from agents.orchestrator import smart_rag_answer
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, BackgroundTasks, Security, Request
@@ -35,6 +38,22 @@ except ImportError:
 
 from core.coordinator import ResearchCoordinator
 
+
+def make_llm_call_fn(coordinator):
+    """
+    Wraps coordinator.llm.make_call() into the simple
+    callable(prompt: str) -> str shape that agents expect.
+    """
+    def llm_call_fn(prompt: str) -> str:
+        response = coordinator.llm.make_call(
+            messages=[{"role": "user", "content": prompt}],
+            json_mode={"type": "json_object"},
+        )
+        if response is None:
+            raise RuntimeError("LLM call returned None")
+        return response.content
+    return llm_call_fn
+
 # ── Logging ──────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +63,10 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+logfire.configure(
+    service_name="research-assistant-api",
+    service_version="1.0.0",
+)
 # Supabase client — optional, only initialised when env vars are present
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
@@ -264,6 +287,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+logfire.instrument_fastapi(app)
+logfire.instrument_httpx()   # auto-traces Firecrawl + Supabase HTTP calls
 # Rate limiter setup
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -552,8 +578,23 @@ async def ask_question(
     start_time = datetime.now()
 
     try:
-        # ✅ Using actual coordinator method: research_query()
-        result = session.coordinator.research_query(req.question)
+        # ✅ Smart RAG routing via orchestrator
+        from agents.orchestrator import smart_rag_answer
+
+        smart_result = smart_rag_answer(
+            question=req.question,
+            coordinator=session.coordinator,
+            llm_call_fn=make_llm_call_fn(session.coordinator),
+            has_documents=session.documents_processed > 0,
+        )
+
+        if smart_result.declined:
+            raise HTTPException(
+                status_code=422,
+                detail=smart_result.decline_reason or "Question is out of scope for this assistant."
+            )
+
+        result = smart_result.synthesis
 
         processing_time = (datetime.now() - start_time).total_seconds()
         session.questions_asked += 1
