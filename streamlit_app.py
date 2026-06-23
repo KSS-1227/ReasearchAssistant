@@ -70,6 +70,23 @@ st.markdown("""
     .stButton > button[kind="primary"]:hover {
         background-color: #1d4ed8 !important;
     }
+    .stAlert {
+        background-color: #0f172a !important;
+        border-left: 4px solid #2563eb !important;
+        color: #e2e8f0 !important;
+    }
+    .stAlert p,
+    .stAlert div,
+    .stAlert span,
+    .stAlert li {
+        color: #e2e8f0 !important;
+    }
+    .stAlert a {
+        color: #93c5fd !important;
+    }
+    .stCaption {
+        color: #94a3b8 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -767,6 +784,31 @@ def render_answer(result: Dict[str, Any], key_suffix: str = ""):
         "Analysis":      synthesis.get("comparative_analysis", []) or synthesis.get("methodology_insights", []),
         "Metrics":       synthesis.get("performance_metrics", []),
     }
+
+    if raw.get("fused_answer"):
+        st.markdown("### 🔎 Answer (Local + Web)")
+
+        # Source badge
+        source = raw.get("source_attribution", "both")
+        badge_color = {"local": "🟢", "web": "🔵", "both": "🟣", "declined": "🔴"}
+        st.caption(f"{badge_color.get(source, '⚪')} Source: **{source.upper()}** — answered using {source} context")
+
+        # Fused answer in a styled info box
+        st.info(raw["fused_answer"])
+
+        # Web sources as proper clickable links
+        if raw.get("web_sources"):
+            with st.expander("🌐 Web sources used", expanded=False):
+                for s in raw["web_sources"]:
+                    st.markdown(f"**[{s['title']}]({s['url']})**")
+                    st.caption(s.get("snippet", "")[:200])
+                    st.divider()
+        elif raw.get("web_findings"):
+            with st.expander("🌐 Web sources used", expanded=False):
+                for w in raw["web_findings"]:
+                    st.markdown(f"- {w}")
+
+        st.divider()
 
     syn_tabs = st.tabs([*fields.keys(), "Raw JSON"])
 
