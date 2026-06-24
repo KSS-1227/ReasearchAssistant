@@ -1,0 +1,14 @@
+def validate_research_query(query: str) -> Dict[str, Any]:
+    """Validate research query input"""
+    if not query or len(query.strip()) < 5:
+        return {"valid": False, "error": "Query too short - minimum 5 characters"}
+    
+    if len(query) > 500:
+        return {"valid": False, "error": "Query too long - maximum 500 characters"}
+    
+    # Check for potentially problematic queries
+    problematic_terms = ["hack", "exploit", "illegal", "harmful"]
+    if any(term in query.lower() for term in problematic_terms):
+        return {"valid": False, "error": "Query contains potentially problematic terms"}
+    
+    return {"valid": True, "cleaned_query": query.strip()}

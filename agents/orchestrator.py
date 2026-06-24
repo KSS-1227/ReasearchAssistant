@@ -6,9 +6,9 @@ retrieval and Firecrawl web search, with citation-aware fused answers.
 
 SPEC (implemented exactly as follows):
   1. Always attempt local FAISS retrieval first.
-  2. If best similarity_score >= LOCAL_CONFIDENCE_THRESHOLD (0.75):
+  2. If best combined_score >= LOCAL_CONFIDENCE_THRESHOLD (0.60):
        answer ONLY from local context. No web call.
-  3. If best similarity_score < threshold:
+  3. If best combined_score < threshold:
        - Ask an LLM scope-check: is this query even related to the
          uploaded research documents / research domain at all?
        - If IN SCOPE  -> trigger Firecrawl web_search, fuse local + web,
@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────
 
-LOCAL_CONFIDENCE_THRESHOLD = 0.75   # >= this -> local-only, no web call
+LOCAL_CONFIDENCE_THRESHOLD = 0.60 # >= this -> local-only, no web call
+WEB_SEARCH_MIN_THRESHOLD = 0.20  
 FAISS_K = 6                          # chunks to pull for the routing check
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
 FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search"
@@ -157,15 +158,14 @@ def retrieve_local(coordinator, question: str, k: int = FAISS_K) -> LocalRetriev
 
 # ── Step 2: Scope check (LLM-based) ──────────────────────────────────────
 
-SCOPE_CHECK_PROMPT = """You are a scope-checking gate for a research \
-assistant. The local document search did not find a strong match for the \
-user's question. Decide whether this question is still something a \
-research assistant should try to answer via a web search, or whether it \
-is genuinely out of scope (e.g. small talk, unrelated personal requests, \
-or topics with no plausible research/academic angle).
+SCOPE_CHECK_PROMPT = """You are a scope-checking gate for a research assistant.
+The user has uploaded a document about: {document_topic}
+
+The local document search did not find a strong match for the user's question.
+Decide whether this question is related enough to the document topic to warrant
+a web search, or whether it is completely out of scope.
 
 QUESTION: {question}
-
 HAS_UPLOADED_DOCUMENTS: {has_documents}
 BEST_LOCAL_SIMILARITY_SCORE: {best_score:.3f}
 
@@ -176,31 +176,30 @@ Respond with ONLY a JSON object, no markdown, no extra text:
 }}
 
 RULES:
-- in_scope=true for any question with a plausible research, academic,
-  technical, or factual angle - even if it's about something NOT in the
-  uploaded documents (that's exactly when web search should help).
-- in_scope=false ONLY for: greetings/small talk, requests unrelated to
-  research entirely (e.g. "write me a poem about my cat"), or requests
-  for harmful/inappropriate content.
-- When genuinely uncertain, prefer in_scope=true - it's better to search
-  and find nothing useful than to wrongly decline a real question.
+- in_scope=true ONLY if the question is related to the document topic
+  OR is a general research/academic/technical question plausibly connected to it.
+- in_scope=false if the question is completely unrelated to the document topic
+  (e.g. document is about AI agents, user asks how to make tea or write a poem).
+- in_scope=false for greetings, small talk, or personal requests.
+- When genuinely uncertain, prefer in_scope=false to avoid returning
+  irrelevant web results that have nothing to do with the user's document.
 """
 
 
-def check_scope(llm_call_fn, question: str, has_documents: bool, best_score: float) -> ScopeVerdict:
+def check_scope(llm_call_fn, question: str, has_documents: bool, best_score: float, document_topic: str = "unknown topic") -> ScopeVerdict:
     prompt = SCOPE_CHECK_PROMPT.format(
-        question=question, has_documents=has_documents, best_score=best_score
+        question=question, has_documents=has_documents, best_score=best_score, document_topic=document_topic
     )
     try:
         raw = llm_call_fn(prompt)
         parsed = _extract_json(raw)
         return ScopeVerdict(
-            in_scope=bool(parsed.get("in_scope", True)),
+            in_scope=bool(parsed.get("in_scope", False)),  # default False now
             reasoning=parsed.get("reasoning", ""),
         )
     except Exception as e:
-        logger.warning("check_scope: LLM call failed (%s) - defaulting to in_scope=True", e)
-        return ScopeVerdict(in_scope=True, reasoning="fallback: scope check failed, defaulting to in-scope")
+        logger.warning("check_scope: LLM call failed (%s) - defaulting to in_scope=False", e)
+        return ScopeVerdict(in_scope=False, reasoning="fallback: scope check failed, defaulting to out-of-scope")
 
 
 # ── Step 3: Web retrieval ────────────────────────────────────────────────
@@ -281,8 +280,22 @@ def smart_rag_answer(
             return SmartRagResult(answer_source="local", declined=False,
                 decline_reason=None, local=local, web=WebRetrieval(), synthesis=synthesis)
 
+        if local.best_score < WEB_SEARCH_MIN_THRESHOLD:
+            logfire.info("routing", decision="hard_declined", best_score=round(local.best_score, 4))
+            return SmartRagResult(answer_source="declined", declined=True,
+                decline_reason="Query has no relevance to the uploaded documents.",
+                local=local, web=WebRetrieval(), synthesis=None)
+
+        document_topic = "unknown topic"
+        if getattr(coordinator, "document_processor", None) is not None:
+            document_topic = getattr(coordinator.document_processor, "document_topic", "unknown topic")
+        document_topic = (
+            coordinator.document_processor.get_document_topic()
+            if getattr(coordinator, "document_processor", None) is not None
+            else "unknown topic"
+        )
         with logfire.span("check_scope"):
-            scope = check_scope(llm_call_fn, question, has_documents, local.best_score)
+            scope = check_scope(llm_call_fn, question, has_documents, local.best_score, document_topic)
         logfire.info("scope_check", in_scope=scope.in_scope, reasoning=scope.reasoning)
 
         if not scope.in_scope:

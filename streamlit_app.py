@@ -87,6 +87,41 @@ st.markdown("""
     .stCaption {
         color: #94a3b8 !important;
     }
+
+    /* Custom answer card for synthesis results */
+    .answer-card {
+        background: #f8fafc !important;
+        border: 1px solid #d1d5db !important;
+        border-radius: 18px !important;
+        color: #111827 !important;
+        padding: 1.1rem 1.2rem !important;
+        margin: 0.75rem 0 !important;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08) !important;
+        line-height: 1.75 !important;
+    }
+    .answer-card p,
+    .answer-card li,
+    .answer-card span,
+    .answer-card div {
+        color: #111827 !important;
+    }
+    .answer-card a {
+        color: #2563eb !important;
+        text-decoration: none !important;
+    }
+    .answer-card a:hover {
+        text-decoration: underline !important;
+    }
+    .answer-chip {
+        display: inline-block !important;
+        background: #e0f2fe !important;
+        color: #1d4ed8 !important;
+        border-radius: 999px !important;
+        padding: 0.18rem 0.7rem !important;
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+        margin-bottom: 0.75rem !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -793,8 +828,11 @@ def render_answer(result: Dict[str, Any], key_suffix: str = ""):
         badge_color = {"local": "🟢", "web": "🔵", "both": "🟣", "declined": "🔴"}
         st.caption(f"{badge_color.get(source, '⚪')} Source: **{source.upper()}** — answered using {source} context")
 
-        # Fused answer in a styled info box
-        st.info(raw["fused_answer"])
+        # Fused answer in a softer card layout
+        st.markdown(
+            f"<div class='answer-card'>{raw['fused_answer'].replace('\n', '<br/>')}</div>",
+            unsafe_allow_html=True,
+        )
 
         # Web sources as proper clickable links
         if raw.get("web_sources"):

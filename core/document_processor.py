@@ -54,6 +54,7 @@ class DocumentProcessor:
         self.embeddings = GoogleEmbeddings(google_api_key)
         self.vector_store: Optional[FAISS] = None
         self.documents: List[Document] = []
+        self.document_topic: str = "unknown topic"
         # Tracks Google Embedding API calls (separate from LLM/synthesis calls)
         self.embedding_call_count = 0
         self.llm_call_count = self.embedding_call_count  # alias for backward compat
@@ -159,6 +160,11 @@ class DocumentProcessor:
                 self.vector_store = FAISS.from_documents(chunks, self.embeddings)
             else:
                 self.vector_store.add_documents(chunks)
+                # Derive document topic from first 3 chunks for scope-checking
+            if self.document_topic == "unknown topic" and chunks:
+                sample = " ".join(c.page_content for c in chunks[:3])[:1500]
+                self.document_topic = self._derive_document_topic(sample)
+
             # Count embedding API calls (NOT synthesis LLM calls)
             self.embedding_call_count += len(chunks)
             self.llm_call_count = self.embedding_call_count  # keep alias in sync
@@ -411,7 +417,17 @@ class DocumentProcessor:
             'llm_calls_made':       self.embedding_call_count,  # backward compat alias
             'vector_store_initialized': self.vector_store is not None,
         }
-    
+
+    def _derive_document_topic(self, sample_text: str) -> str:
+        """Extract a one-line topic from the first few chunks. No LLM call —
+        just take the first non-trivial sentence as a cheap topic signal."""
+        sentences = [s.strip() for s in sample_text.replace("\n", " ").split(".") if len(s.strip()) > 30]
+        return sentences[0][:200] if sentences else "general research document"
+
+    def get_document_topic(self) -> str:
+        """Return the derived topic string for scope-checking in the orchestrator."""
+        return self.document_topic
+
     def reset_processor(self):
         """Reset the document processor and clear all data."""
         self.vector_store = None
