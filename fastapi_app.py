@@ -4,9 +4,11 @@ Endpoints:
   POST   /process               - Build vector index from uploaded docs
   POST   /ask                   - Ask a research question
   GET    /suggested-questions   - Get suggested research questions
+  GET    /documents             - List uploaded documents for a session
+  DELETE /documents/{id}        - Delete a specific document from session
   GET    /health                - Health check
   GET    /status                - System statistics and session info
-  DELETE /reset                 - Clear session and vector index
+  DELETE /reset                 - Clear session and vector index  DELETE /reset                 - Clear session and vector index
 """
 import logfire
 import re
@@ -150,6 +152,19 @@ class StatusResponse(BaseModel):
     system_uptime_seconds: float
 
 
+class DocumentInfo(BaseModel):
+    document_id: str
+    filename: str
+    uploaded_at: str
+    size_kb: float
+
+
+class DocumentListResponse(BaseModel):
+    session_id: str
+    document_count: int
+    documents: List[DocumentInfo]
+
+
 # ── Guardrails ────────────────────────────────────────────────────────────
 
 PROMPT_INJECTION_PATTERNS = [
@@ -187,6 +202,7 @@ class SessionState:
         self.questions_asked = 0
         self.vector_store_ready = False
         self.temp_dir: Optional[str] = None
+        self.uploaded_files: Dict[str, DocumentInfo] = {}
 
     def update_access_time(self):
         self.last_accessed = datetime.now()
@@ -439,6 +455,13 @@ async def upload_documents(
             supported_files.append(file.filename)
             total_size_mb += size_mb
             session.documents_uploaded += 1
+            doc_id = str(uuid.uuid4())[:8]
+            session.uploaded_files[doc_id] = DocumentInfo(
+                document_id=doc_id,
+                filename=file.filename,
+                uploaded_at=datetime.now().isoformat(),
+                size_kb=round(size_mb * 1024, 2),
+            )
 
         if not supported_files:
             sm.delete_session(session.session_id)
@@ -814,7 +837,51 @@ async def reset_session(
     if success:
         return {"message": f"Session {session_id} reset successfully"}
     raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+@app.get("/documents", response_model=DocumentListResponse, tags=["Documents"])
+async def list_documents(
+    session_id: str,
+    sm: SessionManager = Depends(get_session_manager),
+) -> DocumentListResponse:
+    """List all uploaded documents for a session."""
+    session = sm.get_session(session_id)
+    return DocumentListResponse(
+        session_id=session_id,
+        document_count=len(session.uploaded_files),
+        documents=list(session.uploaded_files.values()),
+    )
 
+
+@app.delete("/documents/{document_id}", tags=["Documents"])
+async def delete_document(
+    document_id: str,
+    session_id: str,
+    sm: SessionManager = Depends(get_session_manager),
+) -> Dict[str, str]:
+    """Delete a specific document from the session by document_id.
+    Note: rebuilds the FAISS index after removal."""
+    session = sm.get_session(session_id)
+
+    if document_id not in session.uploaded_files:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document '{document_id}' not found in session '{session_id}'"
+        )
+
+    filename = session.uploaded_files[document_id].filename
+    del session.uploaded_files[document_id]
+    session.documents_uploaded = len(session.uploaded_files)
+
+    # Reset vector store so stale chunks from deleted doc are cleared
+    session.coordinator.document_processor.reset_processor()
+    session.vector_store_ready = False
+    session.documents_processed = 0
+
+    logger.info(f"Session {session_id}: deleted document {document_id} ({filename})")
+
+    return {
+        "message": f"Document '{filename}' deleted.",
+        "warning": "Vector index cleared. Run POST /process again to rebuild from remaining documents."
+    }
 
 # ── Run directly ──────────────────────────────────────────────────────────
 
