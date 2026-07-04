@@ -47,6 +47,7 @@ supabase>=2.0.0
 
 slowapi>=0.1.9
 streamlit-cookies-manager>=0.2.0
-logfire[fastapi]>=3.0.0
-logfire[fastapi,httpx]>=3.0.
-rank-bm25
+# Use a single logfire entry with both extras and a proper version
+logfire[fastapi,httpx]>=3.0.0
+# Rank-BM25 package (tokeniser & BM25 implementation)
+rank-bm25>=0.2.1
