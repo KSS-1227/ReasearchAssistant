@@ -122,36 +122,59 @@ def firecrawl_search(query: str, max_results: int = 3) -> List[Dict[str, str]]:
 
 def retrieve_local(coordinator, question: str, k: int = FAISS_K) -> LocalRetrieval:
     """
-    Pull chunks from the existing FAISS-backed DocumentProcessor.
-    Reuses coordinator.document_processor.search_documents(), which
-    already returns 'similarity_score' per chunk (see core/document_processor.py).
+    Hybrid retrieval: FAISS vector search + BM25 keyword search,
+    merged via Reciprocal Rank Fusion (RRF).
+    rrf_score replaces combined_score as the routing signal.
     """
     result = LocalRetrieval()
+    try:
+        faiss_chunks = coordinator.document_processor.search_documents(question, k=k)
+        bm25_chunks  = coordinator.document_processor.search_bm25(question, k=k)
+    except Exception as e:
+        logger.warning("retrieve_local: search failed: %s", e)
+        return result
 
-    has_store = (
-        getattr(coordinator, "document_processor", None) is not None
-        and getattr(coordinator.document_processor, "vector_store", None) is not None
-    )
-    if not has_store:
+    if not faiss_chunks and not bm25_chunks:
         logger.info("retrieve_local: no vector store initialised - skipping")
         return result
+    # ── Reciprocal Rank Fusion ──────────────────────────────────────────
+    # Build a content → rrf_score map across both result lists
+    RRF_K = 60  # standard constant — dampens top-rank dominance
+    rrf_scores: Dict[str, float] = {}
+    chunk_map:  Dict[str, Dict]  = {}
 
-    try:
-        chunks = coordinator.document_processor.search_documents(question, k=k)
-    except Exception as e:
-        logger.warning("retrieve_local: search_documents failed: %s", e)
-        return result
+    for rank, chunk in enumerate(faiss_chunks):
+        key = chunk["content"][:200]   # dedup key
+        rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (rank + 1 + RRF_K)
+        chunk_map[key]  = chunk
 
-    if not chunks:
-        return result
+    for rank, chunk in enumerate(bm25_chunks):
+        key = chunk["content"][:200]
+        rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (rank + 1 + RRF_K)
+        if key not in chunk_map:
+            chunk_map[key] = chunk
+    # Sort by RRF score descending, keep top-k
+    sorted_keys = sorted(rrf_scores, key=lambda k: rrf_scores[k], reverse=True)[:k]
 
-    result.chunks = chunks
-    result.best_score = max(c.get("similarity_score", 0.0) for c in chunks)
-    result.context = "\n\n".join(c.get("content", "").strip() for c in chunks if c.get("content"))
+    merged_chunks = []
+    for key in sorted_keys:
+        chunk = chunk_map[key]
+        chunk["rrf_score"] = round(rrf_scores[key], 6)
+        merged_chunks.append(chunk)
 
+    result.chunks   = merged_chunks
+    # Normalise RRF score to [0,1] for threshold comparison
+    # Max possible RRF score (rank 1 in both lists) = 2/(1+60) ≈ 0.0328
+    MAX_RRF = 2.0 / (1.0 + RRF_K)
+    raw_best = merged_chunks[0]["rrf_score"] if merged_chunks else 0.0
+    # REVERT: use pure RRF normalisation (no FAISS weighting)
+    result.best_score = round(min(raw_best / MAX_RRF, 1.0), 4)
+    result.context = "\n\n".join(
+        c.get("content", "").strip() for c in merged_chunks if c.get("content")
+    )
     logger.info(
-        "retrieve_local: %d chunks, best_similarity_score=%.4f",
-        len(chunks), result.best_score,
+        "retrieve_local: faiss=%d bm25=%d merged=%d best_rrf_normalised=%.4f",
+        len(faiss_chunks), len(bm25_chunks), len(merged_chunks), result.best_score,
     )
     return result
 

@@ -595,6 +595,11 @@ async def ask_question(
             detail="Question contains disallowed content and cannot be processed."
         )
 
+    # Scrub token from logs
+    safe_req = req.dict()
+    safe_req["user_token"] = "[REDACTED]"
+    logfire.info("ask_request", **safe_req)
+
     session = sm.get_session(req.session_id)
 
     if not session.vector_store_ready:

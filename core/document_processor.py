@@ -8,11 +8,25 @@ with Google embeddings for 100% Google ecosystem integration.
 import os
 import tempfile
 import re
+import string
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import logging
+from rank_bm25 import BM25Okapi
 
 logger = logging.getLogger(__name__)
+
+# Standard English stopwords + domain stopwords derived from corpus
+STOPWORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can",
+    "what", "how", "why", "when", "where", "who", "which", "that",
+    "this", "these", "those", "i", "we", "you", "he", "she", "it",
+    "they", "them", "their", "our", "your", "its", "of", "in",
+    "for", "on", "with", "at", "by", "from", "as", "into", "to",
+    "and", "or", "but", "not", "no", "so", "if", "about"
+}
 
 # LangChain imports for document processing and vector storage
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
@@ -54,6 +68,8 @@ class DocumentProcessor:
         self.embeddings = GoogleEmbeddings(google_api_key)
         self.vector_store: Optional[FAISS] = None
         self.documents: List[Document] = []
+        self.bm25_index: Optional[BM25Okapi] = None   # keyword search index
+        self.bm25_corpus: List[str] = []
         self.document_topic: str = "unknown topic"
         # Tracks Google Embedding API calls (separate from LLM/synthesis calls)
         self.embedding_call_count = 0
@@ -160,7 +176,13 @@ class DocumentProcessor:
                 self.vector_store = FAISS.from_documents(chunks, self.embeddings)
             else:
                 self.vector_store.add_documents(chunks)
-                # Derive document topic from first 3 chunks for scope-checking
+
+            # Build / update BM25 index alongside FAISS (runs for every document)
+            new_texts = [c.page_content for c in chunks]
+            self.bm25_corpus.extend(new_texts)
+            tokenised_corpus = [t.lower().split() for t in self.bm25_corpus]
+            self.bm25_index = BM25Okapi(tokenised_corpus)
+
             if self.document_topic == "unknown topic" and chunks:
                 sample = " ".join(c.page_content for c in chunks[:3])[:1500]
                 self.document_topic = self._derive_document_topic(sample)
@@ -374,15 +396,66 @@ class DocumentProcessor:
         except Exception as e:
             logger.error("Document search failed: %s", e)
             return []
-    
+    def search_bm25(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Keyword-based BM25 search across all chunks.
+        Returns top-k chunks ranked by BM25 score, formatted the same
+        way as search_documents() so RRF fusion is straightforward.
+        """
+        if not self.bm25_index or not self.bm25_corpus:
+            logger.warning("BM25 index not initialised")
+            return []
+
+        # Build combined stopword set
+        domain_stops = self._get_domain_stopwords()
+        all_stops = STOPWORDS | domain_stops
+
+        # Filter query tokens (strip punctuation, remove stopwords, drop single chars)
+        tokens = [
+            t.strip(string.punctuation)
+            for t in query.lower().split()
+            if t.strip(string.punctuation) not in all_stops
+            and len(t.strip(string.punctuation)) > 1
+        ]
+
+        if not tokens:
+            # All query tokens were stopwords — return empty, let FAISS handle it
+            logger.info("search_bm25: all tokens filtered as stopwords, skipping")
+            return []
+
+        scores = self.bm25_index.get_scores(tokens)           # score per chunk
+        top_indices = sorted(range(len(scores)),
+                             key=lambda i: scores[i],
+                             reverse=True)[:k]
+
+        results = []
+        for rank, idx in enumerate(top_indices):
+            if scores[idx] < 1.0:
+                break  # ignore low-scoring chunks
+            chunk_doc = self.documents[idx] if idx < len(self.documents) else None
+            results.append({
+                "content":          self.bm25_corpus[idx],
+                "metadata":         chunk_doc.metadata if chunk_doc else {},
+                "bm25_score":       float(scores[idx]),
+                "bm25_rank":        rank + 1,
+                "similarity_score": 0.0,   # not available from BM25
+                "source":           chunk_doc.metadata.get("source", "Unknown") if chunk_doc else "Unknown",
+                "page":             chunk_doc.metadata.get("page", "N/A") if chunk_doc else "N/A",
+                "heading":          chunk_doc.metadata.get("heading", "N/A") if chunk_doc else "N/A",
+                "source_file":      chunk_doc.metadata.get("source_file", "Unknown") if chunk_doc else "Unknown",
+            })
+
+        logger.info("search_bm25: query=%r top_k=%d returned=%d", query, k, len(results))
+        return results
+
     def get_document_summary(self, query: str, max_chunks: int = 3) -> Dict[str, Any]:
         """
         Get a summary of relevant document chunks for a query.
-        
+
         Args:
             query: Query to find relevant chunks
             max_chunks: Maximum number of chunks to include
-            
+
         Returns:
             Summary with relevant chunks and metadata
         """
@@ -428,9 +501,23 @@ class DocumentProcessor:
         """Return the derived topic string for scope-checking in the orchestrator."""
         return self.document_topic
 
+    def _get_domain_stopwords(self) -> set:
+        """Find terms appearing in >60% of chunks — these are domain noise."""
+        if not self.bm25_corpus:
+            return set()
+        total = len(self.bm25_corpus)
+        from collections import Counter
+        doc_freq = Counter()
+        for text in self.bm25_corpus:
+            unique_tokens = set(text.lower().split())
+            doc_freq.update(unique_tokens)
+        return {term for term, count in doc_freq.items() if count / total > 0.6}
+
     def reset_processor(self):
         """Reset the document processor and clear all data."""
         self.vector_store = None
+        self.bm25_index = None
+        self.bm25_corpus = []
         self.documents = []
         self.embedding_call_count = 0
         self.llm_call_count = 0
