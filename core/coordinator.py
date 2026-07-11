@@ -34,6 +34,7 @@ from core.pipeline_logger import PipelineLogger
 from agents.citation_extractor import CitationExtractor
 from agents.literature_scanner import LiteratureScanner
 from agents.synthesis_agent import SynthesisAgent
+from agents.verification_agent import VerificationAgent
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ class ResearchCoordinator:
         self.literature_scanner  = LiteratureScanner()   # Step 1: 0 LLM calls
         self.citation_extractor  = CitationExtractor()   # Step 2: 0 LLM calls
         self.synthesis_agent     = SynthesisAgent(self.llm)  # Step 3: 1 LLM call
+        self.verification_agent  = VerificationAgent()       # Step 4: 0 LLM calls
 
         # Session counter for logging
         self.total_queries_processed = 0
@@ -392,6 +394,28 @@ class ResearchCoordinator:
 
         self.memory.update_session(session_id, synthesis=synthesis)
 
+        # ── Step 4: Verification Agent (0 LLM calls, embedding calls only) ──
+        logger.info("Step 4 | VerificationAgent starting (0 LLM calls)...")
+
+        verification_result = self.verification_agent.process({
+            "synthesis":    synthesis,
+            "citation_map": synthesis_result.get("citation_map", {}),
+            "papers":       extraction_result["enhanced_papers"],
+        })
+        verification = verification_result.get("verification")
+
+        if verification:
+            logger.info(
+                "Step 4 done | citations_valid=%s grounding_score=%.2f unsupported=%d",
+                verification.citations_valid, verification.grounding_score,
+                len(verification.unsupported_claims),
+            )
+        else:
+            logger.warning(
+                "Step 4 skipped/failed | error=%s",
+                verification_result.get("error"),
+            )
+
         # ── Compile final result ──────────────────────────────────────
         # Return selected_k alongside result so the caller can log it correctly
         selected_k = scanner_result.get("effective_k", scanner_result.get("dynamic_k", 0))
@@ -399,7 +423,7 @@ class ResearchCoordinator:
             self._compile_result(
                 session_id, query, domain,
                 papers_found, extraction_result, synthesis_result,
-                retrieval_confidence,
+                retrieval_confidence, verification,
             ),
             selected_k,
         )
@@ -413,6 +437,7 @@ class ResearchCoordinator:
         extraction_result: Dict[str, Any],
         synthesis_result: Dict[str, Any],
         retrieval_confidence: float,
+        verification: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Assemble the final result dict returned to the UI.
@@ -506,11 +531,16 @@ class ResearchCoordinator:
                 "total_llm_calls":          self.llm.call_count,
                 "estimated_cost":           self.llm.total_cost,
                 "papers_analyzed":          len(papers),
-                "agents_used":              3,
+                "agents_used":              4,
                 "llm_agent_calls":          synthesis_result["llm_calls_made"],
-                "deterministic_agent_calls": 2,
+                "deterministic_agent_calls": 3,
                 "retrieval_confidence":     retrieval_confidence,
             },
+
+            # Citation-validity + grounding check on the synthesis output.
+            # 0 LLM calls; embedding calls only. None if the agent failed
+            # (never blocks the response -- verification is advisory).
+            "verification": verification.to_dict() if verification else None,
         }
 
     # ------------------------------------------------------------------
@@ -657,6 +687,7 @@ class ResearchCoordinator:
             "LiteratureScanner": self.literature_scanner,
             "CitationExtractor": self.citation_extractor,
             "SynthesisAgent":    self.synthesis_agent,
+            "VerificationAgent": self.verification_agent,
         }
         total        = len(agents)
         llm_count    = sum(1 for a in agents.values() if a.uses_llm)
@@ -688,6 +719,7 @@ class ResearchCoordinator:
                     self.literature_scanner is not None,
                     self.citation_extractor is not None,
                     self.synthesis_agent    is not None,
+                    self.verification_agent is not None,
                 ]),
             },
             "architecture": self.validate_system_architecture(),
@@ -712,6 +744,11 @@ class ResearchCoordinator:
                     "step": 3, "agent": "SynthesisAgent",
                     "llm_calls": 1,
                     "features": "citation-aware prompt + Gemini synthesis",
+                },
+                {
+                    "step": 4, "agent": "VerificationAgent",
+                    "llm_calls": 0,
+                    "features": "citation validity check + embedding-based grounding score",
                 },
             ],
             "total_llm_calls":    1,
